@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__ide__getDiagnostics",
+      "Bash(npm install:*)",
+      "Bash(npm run:*)",
+      "Bash(curl -I \"http://127.0.0.1:3001/books\")",
+      "Bash(curl -I \"http://127.0.0.1:3001/review\")"
+    ]
+  }
+}
