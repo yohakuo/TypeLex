@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { ChangeEvent, FormEvent, useEffect, useState } from 'react';
 import { EmptyState } from '@/components/empty-state';
 import { getBookById } from '@/features/books/selectors';
+import { parseWordsCsv, parseWordsTxt } from '@/lib/csv/words-csv';
 import { HydrationGate, useAppData } from '@/providers/app-data-provider';
 
 const CHAPTER_SIZES = [20, 50, 100, 200];
@@ -107,12 +108,15 @@ export default function BookDetailPage() {
 
     if (wordsToImport.length > 0) {
       const importedCount = importWords(bookId, wordsToImport);
+      setError(null);
       setMessage(`成功更新词书并导入了 ${importedCount} 个新单词。`);
-      setFile(null); // Reset file input
-    } else {
-      setMessage('词书设置已更新。');
+      setFile(null);
+      router.push(`/study/${bookId}`);
+      return;
     }
+
     setError(null);
+    setMessage('词书设置已更新。');
   }
 
   return (
@@ -124,7 +128,7 @@ export default function BookDetailPage() {
               ← 返回我的单词本
             </Link>
             <h1>修改单词本: {book.name}</h1>
-            <p>修改词书名字和每章单词数，或选择追加导入新单词。</p>
+            <p>修改词书名字和每章单词数，或选择追加导入新单词。导入成功后会直接进入章节选择页。</p>
           </div>
         </section>
 
@@ -187,9 +191,7 @@ export default function BookDetailPage() {
                 backgroundColor: '#f8fafc',
                 cursor: 'pointer',
                 marginTop: '4px'
-              }}
-              onClick={() => document.getElementById('file-upload')?.click()}
-              >
+              }}>
                 {file ? (
                   <span style={{ color: '#10b981', fontWeight: 500 }}>✓ 已选择: {file.name}</span>
                 ) : (

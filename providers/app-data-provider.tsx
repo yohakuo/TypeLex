@@ -11,7 +11,7 @@ import {
 } from 'react';
 import { createDefaultReviewState, updateReviewState } from '@/features/review/scheduling';
 import { createEmptyAppData, createId, loadAppData, saveAppData } from '@/lib/storage/app-data';
-import { parseWordsCsv } from '@/lib/csv/words-csv';
+import { normalizeWordInput, normalizeWordKey, parseWordsCsv } from '@/lib/csv/words-csv';
 import type {
   AppData,
   DictationAttempt,
@@ -52,25 +52,11 @@ interface AppDataContextValue {
 
 const AppDataContext = createContext<AppDataContextValue | null>(null);
 
-function normalizeOptionalText(value: string | undefined): string | undefined {
-  const trimmed = value?.trim();
-  return trimmed ? trimmed : undefined;
-}
-
-function normalizeWordInput(input: WordInput): WordInput {
-  return {
-    word: input.word.trim(),
-    meaning: normalizeOptionalText(input.meaning),
-    example: normalizeOptionalText(input.example),
-    notes: normalizeOptionalText(input.notes),
-  };
-}
-
 function hasDuplicateWord(words: WordEntry[], bookId: string, value: string, excludeWordId?: string): boolean {
-  const normalized = value.trim().toLowerCase();
+  const normalized = normalizeWordKey(value);
 
   return words.some(
-    (word) => word.bookId === bookId && word.id !== excludeWordId && word.word.trim().toLowerCase() === normalized,
+    (word) => word.bookId === bookId && word.id !== excludeWordId && normalizeWordKey(word.word) === normalized,
   );
 }
 
@@ -83,7 +69,10 @@ function buildWordEntry(bookId: string, input: WordInput): WordEntry {
     bookId,
     word: normalized.word,
     meaning: normalized.meaning,
+    phonetic: normalized.phonetic,
     example: normalized.example,
+    exampleTranslate: normalized.exampleTranslate,
+    chapter: normalized.chapter,
     notes: normalized.notes,
     createdAt: now,
     updatedAt: now,
@@ -131,16 +120,23 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
                 updatedAt: now,
               };
 
-              const entries: WordEntry[] = parsed.rows.map((row) => ({
-                id: createId(),
-                bookId,
-                word: row.word.trim().toLowerCase(),
-                meaning: row.meaning?.trim(),
-                example: row.example?.trim(),
-                notes: row.notes?.trim(),
-                createdAt: now,
-                updatedAt: now,
-              }));
+              const entries: WordEntry[] = parsed.rows.map((row) => {
+                const normalized = normalizeWordInput(row);
+
+                return {
+                  id: createId(),
+                  bookId,
+                  word: normalized.word.toLowerCase(),
+                  meaning: normalized.meaning,
+                  phonetic: normalized.phonetic,
+                  example: normalized.example,
+                  exampleTranslate: normalized.exampleTranslate,
+                  chapter: normalized.chapter,
+                  notes: normalized.notes,
+                  createdAt: now,
+                  updatedAt: now,
+                };
+              });
 
               const nextReviewStates = { ...current.reviewStates };
               entries.forEach((word) => {
@@ -295,7 +291,10 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
               ...word,
               word: normalized.word,
               meaning: normalized.meaning,
+              phonetic: normalized.phonetic,
               example: normalized.example,
+              exampleTranslate: normalized.exampleTranslate,
+              chapter: normalized.chapter,
               notes: normalized.notes,
               updatedAt,
             }
@@ -337,7 +336,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     const seen = new Set(
       data.words
         .filter((word) => word.bookId === bookId)
-        .map((word) => word.word.trim().toLowerCase()),
+        .map((word) => normalizeWordKey(word.word)),
     );
 
     const entries = words
@@ -347,7 +346,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
           return false;
         }
 
-        const normalized = word.word.toLowerCase();
+        const normalized = normalizeWordKey(word.word);
 
         if (seen.has(normalized)) {
           return false;

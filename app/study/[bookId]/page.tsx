@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useMemo } from 'react';
 import { EmptyState } from '@/components/empty-state';
-import { getBookById, getBookStudyProgress, getBookWords } from '@/features/books/selectors';
+import { getBookById, getBookStudyProgress } from '@/features/books/selectors';
 import { HydrationGate, useAppData } from '@/providers/app-data-provider';
 
 export default function ChapterSelectionPage() {
@@ -12,7 +12,15 @@ export default function ChapterSelectionPage() {
   const bookId = params.bookId;
   const { data } = useAppData();
   const book = getBookById(data, bookId);
-  const words = useMemo(() => getBookWords(data, bookId), [bookId, data]);
+  const chapterSize = book?.chapterSize || 20;
+  const progress = useMemo(() => getBookStudyProgress(data, bookId, chapterSize), [bookId, chapterSize, data]);
+  const words = useMemo(
+    () => progress.chapters.flatMap((chapter) => chapter.words),
+    [progress.chapters],
+  );
+  const chapterSummary = progress.usesExplicitChapters
+    ? `共 ${words.length} 个单词，按源章节分组。请选择一章开始听写。`
+    : `共 ${words.length} 个单词，每章 ${chapterSize} 个单词。请选择一章开始听写。`;
 
   if (!book) {
     return (
@@ -46,9 +54,6 @@ export default function ChapterSelectionPage() {
     );
   }
 
-  const chapterSize = book.chapterSize || 20;
-  const progress = getBookStudyProgress(data, bookId, chapterSize);
-
   return (
     <HydrationGate>
       <div className="page-stack">
@@ -58,7 +63,7 @@ export default function ChapterSelectionPage() {
               ← 返回首页
             </Link>
             <h1>{book.name} - 选择章节</h1>
-            <p>共 {words.length} 个单词，每章 {chapterSize} 个单词。请选择一章开始听写。</p>
+            <p>{chapterSummary}</p>
           </div>
         </section>
 
@@ -83,7 +88,7 @@ export default function ChapterSelectionPage() {
               return (
                 <Link
                   key={chapter.chapter}
-                  href={`/study/${book.id}/run?chapter=${chapter.chapter}&size=${chapterSize}`}
+                  href={`/study/${book.id}/run?chapter=${chapter.chapter}`}
                   className="button-secondary"
                   style={{
                     display: 'flex',
@@ -94,7 +99,7 @@ export default function ChapterSelectionPage() {
                     gap: '4px',
                   }}
                 >
-                  <span style={{ fontWeight: 500 }}>第 {chapter.chapter} 章</span>
+                  <span style={{ fontWeight: 500 }}>{chapter.label}</span>
                   <span style={{ fontSize: '0.85em', opacity: 0.7 }}>
                     {chapter.startWordNumber} - {chapter.endWordNumber} 词
                   </span>

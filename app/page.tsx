@@ -41,8 +41,11 @@ export default function HomePage() {
     const inputs = wrongWords.map(w => ({
       word: w.word,
       meaning: w.meaning,
+      phonetic: w.phonetic,
       example: w.example,
-      notes: w.notes
+      exampleTranslate: w.exampleTranslate,
+      chapter: w.chapter,
+      notes: w.notes,
     }));
 
     const imported = importWords(wrongBook.id, inputs);

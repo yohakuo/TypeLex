@@ -13,7 +13,10 @@ export interface WordEntry {
   bookId: string;
   word: string;
   meaning?: string;
+  phonetic?: string;
   example?: string;
+  exampleTranslate?: string;
+  chapter?: string;
   notes?: string;
   createdAt: string;
   updatedAt: string;
@@ -58,6 +61,9 @@ export interface AppData {
 export interface WordInput {
   word: string;
   meaning?: string;
+  phonetic?: string;
   example?: string;
+  exampleTranslate?: string;
+  chapter?: string;
   notes?: string;
 }

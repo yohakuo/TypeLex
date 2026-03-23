@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { EmptyState } from '@/components/empty-state';
-import { getBookById, getBookWords, getStudyProgressKey, resolveStudyProgress } from '@/features/books/selectors';
+import { getBookById, getBookStudyChapter, getStudyProgressKey, resolveStudyProgress } from '@/features/books/selectors';
 import { isCorrectAnswer } from '@/features/study/answer';
 import { useSpeechSynthesis } from '@/lib/speech/use-speech-synthesis';
 import { useSoundEffects } from '@/lib/speech/use-sound-effects';
@@ -16,28 +16,21 @@ export default function StudyPage() {
   const bookId = params.bookId;
   const { data, recordAttempt, updateStudyProgress } = useAppData();
   const book = getBookById(data, bookId);
-  const allWords = useMemo(() => getBookWords(data, bookId), [bookId, data]);
 
-  const chapter = Math.max(parseInt(searchParams.get('chapter') || '0', 10), 0);
-  const requestedSize = Math.max(parseInt(searchParams.get('size') || '20', 10), 1);
-  const chapterSize = chapter > 0 ? requestedSize : allWords.length || requestedSize;
-
-  const words = useMemo(() => {
-    if (chapter > 0) {
-      return allWords.slice((chapter - 1) * chapterSize, chapter * chapterSize);
-    }
-    return allWords;
-  }, [allWords, chapter, chapterSize]);
-
-  const progressKey = useMemo(
-    () => getStudyProgressKey(bookId, chapter || 1, chapterSize),
-    [bookId, chapter, chapterSize],
+  const chapter = Math.max(parseInt(searchParams.get('chapter') || '1', 10), 1);
+  const fallbackChapterSize = book?.chapterSize || 20;
+  const chapterData = useMemo(
+    () => getBookStudyChapter(data, bookId, chapter, fallbackChapterSize),
+    [bookId, chapter, data, fallbackChapterSize],
   );
+  const words = chapterData?.words ?? [];
+  const chapterSize = chapterData?.size ?? fallbackChapterSize;
+
+  const progressKey = useMemo(() => getStudyProgressKey(bookId, chapter, chapterSize), [bookId, chapter, chapterSize]);
   const savedProgress = data.studyProgress[progressKey];
-  const resolvedProgress = useMemo(
-    () => resolveStudyProgress(savedProgress, words.length),
-    [savedProgress, words.length],
-  );
+  const resolvedProgress = useMemo(() => resolveStudyProgress(savedProgress, words.length), [savedProgress, words.length]);
+  const chapterLabel = chapterData?.label ?? `第 ${chapter} 章`;
+  const chapterBackLabel = chapterData?.hasExplicitLabel ? chapterLabel : `${book?.name ?? ''} 章节列表`;
 
   const [currentIndex, setCurrentIndex] = useState(resolvedProgress.currentIndex);
   const [answer, setAnswer] = useState('');
@@ -71,7 +64,7 @@ export default function StudyPage() {
         key: progressKey,
         progress: {
           bookId,
-          chapter: chapter || 1,
+          chapter,
           size: chapterSize,
           currentIndex: safeIndex,
           completedCount: boundedCompletedCount,
@@ -232,10 +225,10 @@ export default function StudyPage() {
       <HydrationGate>
         <EmptyState
           title="没有可练习的单词"
-          description="该章节没有单词或单词书为空。"
+          description="该章节没有单词、章节不存在，或单词书为空。"
           action={
-            <Link href={`/books/${bookId}`} className="button">
-              管理单词
+            <Link href={`/study/${bookId}`} className="button">
+              返回章节列表
             </Link>
           }
         />
@@ -248,8 +241,12 @@ export default function StudyPage() {
       <div className="typing-page" ref={containerRef} tabIndex={0}>
         <div className="typing-topbar" style={{ position: 'relative' }}>
           <Link href={`/study/${book.id}`} className="typing-back-link">
-            ← 返回 {book.name} 章节列表
+            ← 返回 {chapterBackLabel}
           </Link>
+
+          <div style={{ position: 'absolute', right: '16px', top: '8px', fontSize: '0.9rem', color: '#6b7280' }}>
+            {chapterLabel}
+          </div>
 
           {lastAttempt && (
             <div

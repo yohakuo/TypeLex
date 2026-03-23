@@ -70,8 +70,7 @@ export default function NewBookPage() {
       importWords(result.book.id, wordsToImport);
     }
 
-    // Redirect to books list
-    router.push('/books');
+    router.push(`/study/${result.book.id}`);
   }
 
   return (
@@ -83,7 +82,7 @@ export default function NewBookPage() {
               ← 返回我的单词本
             </Link>
             <h1>新建自定义词书</h1>
-            <p>创建一个新的词书并可以选择导入您的单词。</p>
+            <p>创建一个新的词书，并可选择导入单词。创建成功后会直接进入章节选择页。</p>
           </div>
         </section>
 
@@ -146,9 +145,7 @@ export default function NewBookPage() {
                 backgroundColor: '#f8fafc',
                 cursor: 'pointer',
                 marginTop: '4px'
-              }}
-              onClick={() => document.getElementById('file-upload')?.click()}
-              >
+              }}>
                 {file ? (
                   <span style={{ color: '#10b981', fontWeight: 500 }}>✓ 已选择: {file.name}</span>
                 ) : (

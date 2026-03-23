@@ -9,15 +9,29 @@ export interface ResolvedStudyProgress {
 
 export interface ChapterStudyProgress extends ResolvedStudyProgress {
   chapter: number;
+  label: string;
+  hasExplicitLabel: boolean;
+  size: number;
   startWordNumber: number;
   endWordNumber: number;
+  words: WordEntry[];
 }
 
 export interface BookStudyProgressSummary {
   totalWords: number;
   completedCount: number;
   totalChapters: number;
+  usesExplicitChapters: boolean;
   chapters: ChapterStudyProgress[];
+}
+
+interface ChapterWordGroup {
+  label: string;
+  hasExplicitLabel: boolean;
+  size: number;
+  startWordNumber: number;
+  endWordNumber: number;
+  words: WordEntry[];
 }
 
 export function getBookWords(data: AppData, bookId: string): WordEntry[] {
@@ -71,30 +85,111 @@ export function resolveStudyProgress(progress: StudyProgress | undefined, totalW
   };
 }
 
-export function getBookStudyProgress(data: AppData, bookId: string, chapterSize: number): BookStudyProgressSummary {
-  const words = getBookWords(data, bookId);
+function normalizeChapterLabel(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+function buildExplicitChapterGroups(words: WordEntry[]): ChapterWordGroup[] {
+  const chapterMap = new Map<string, ChapterWordGroup>();
+
+  words.forEach((word, index) => {
+    const label = normalizeChapterLabel(word.chapter) ?? '未分组';
+    const existing = chapterMap.get(label);
+
+    if (existing) {
+      existing.words.push(word);
+      existing.size += 1;
+      existing.endWordNumber = index + 1;
+      return;
+    }
+
+    chapterMap.set(label, {
+      label,
+      hasExplicitLabel: normalizeChapterLabel(word.chapter) !== undefined,
+      size: 1,
+      startWordNumber: index + 1,
+      endWordNumber: index + 1,
+      words: [word],
+    });
+  });
+
+  return Array.from(chapterMap.values());
+}
+
+function buildFixedSizeChapterGroups(words: WordEntry[], chapterSize: number): ChapterWordGroup[] {
   const safeChapterSize = chapterSize > 0 ? chapterSize : 20;
   const totalChapters = Math.ceil(words.length / safeChapterSize);
-  const chapters: ChapterStudyProgress[] = Array.from({ length: totalChapters }, (_, index) => {
+
+  return Array.from({ length: totalChapters }, (_, index) => {
+    const chapterWords = words.slice(index * safeChapterSize, (index + 1) * safeChapterSize);
+
+    return {
+      label: `第 ${index + 1} 章`,
+      hasExplicitLabel: false,
+      size: safeChapterSize,
+      startWordNumber: index * safeChapterSize + 1,
+      endWordNumber: index * safeChapterSize + chapterWords.length,
+      words: chapterWords,
+    };
+  });
+}
+
+function buildChapterWordGroups(words: WordEntry[], chapterSize: number): {
+  usesExplicitChapters: boolean;
+  groups: ChapterWordGroup[];
+} {
+  const usesExplicitChapters = words.some((word) => normalizeChapterLabel(word.chapter) !== undefined);
+
+  return {
+    usesExplicitChapters,
+    groups: usesExplicitChapters
+      ? buildExplicitChapterGroups(words)
+      : buildFixedSizeChapterGroups(words, chapterSize),
+  };
+}
+
+export function getBookStudyChapters(data: AppData, bookId: string, chapterSize: number): ChapterStudyProgress[] {
+  const words = getBookWords(data, bookId);
+  const { groups } = buildChapterWordGroups(words, chapterSize);
+
+  return groups.map((group, index) => {
     const chapter = index + 1;
-    const chapterWords = words.slice(index * safeChapterSize, chapter * safeChapterSize);
-    const resolved = resolveStudyProgress(
-      data.studyProgress[getStudyProgressKey(bookId, chapter, safeChapterSize)],
-      chapterWords.length,
-    );
+    const size = group.size;
+    const resolved = resolveStudyProgress(data.studyProgress[getStudyProgressKey(bookId, chapter, size)], group.words.length);
 
     return {
       chapter,
-      startWordNumber: index * safeChapterSize + 1,
-      endWordNumber: index * safeChapterSize + chapterWords.length,
+      label: group.label,
+      hasExplicitLabel: group.hasExplicitLabel,
+      size,
+      startWordNumber: group.startWordNumber,
+      endWordNumber: group.endWordNumber,
+      words: group.words,
       ...resolved,
     };
   });
+}
+
+export function getBookStudyChapter(
+  data: AppData,
+  bookId: string,
+  chapter: number,
+  chapterSize: number,
+): ChapterStudyProgress | undefined {
+  return getBookStudyChapters(data, bookId, chapterSize).find((entry) => entry.chapter === chapter);
+}
+
+export function getBookStudyProgress(data: AppData, bookId: string, chapterSize: number): BookStudyProgressSummary {
+  const words = getBookWords(data, bookId);
+  const { usesExplicitChapters } = buildChapterWordGroups(words, chapterSize);
+  const chapters = getBookStudyChapters(data, bookId, chapterSize);
 
   return {
     totalWords: words.length,
     completedCount: chapters.reduce((sum, chapter) => sum + chapter.completedCount, 0),
-    totalChapters,
+    totalChapters: chapters.length,
+    usesExplicitChapters,
     chapters,
   };
 }
