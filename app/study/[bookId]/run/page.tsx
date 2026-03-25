@@ -333,8 +333,8 @@ export default function StudyPage() {
                 <div className="typing-previous-word-text">{previousWordAttempt.word}</div>
                 {previousWordAttempt.meaningParts.length > 0 ? (
                   <div className="typing-previous-word-meanings">
-                    {previousWordAttempt.meaningParts.map((meaning) => (
-                      <span key={meaning} className="typing-previous-word-meaning">
+                    {previousWordAttempt.meaningParts.map((meaning, index) => (
+                      <span key={`${meaning}-${index}`} className="typing-previous-word-meaning">
                         {meaning}
                       </span>
                     ))}
@@ -360,7 +360,7 @@ export default function StudyPage() {
               <p className="kicker">章节完成</p>
               <h2 style={{ marginBottom: '12px' }}>{chapterLabel} 已完成</h2>
               <p className="muted" style={{ marginBottom: '20px' }}>
-                本章单词已全部完成，可以继续下一章或返回首页。
+                本章单词已全部完成！
               </p>
               <div className="button-row" style={{ justifyContent: 'center' }}>
                 {nextChapter ? (
