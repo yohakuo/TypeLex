@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
+import { getBookStudyProgress } from '@/features/books/selectors';
 import { createEmptyAppData } from '@/lib/storage/app-data';
-import { updateReviewState, getDueReviewWords, getRecentMistakeWords } from '@/features/review/scheduling';
+import {
+  countTodayWrongWords,
+  getDueReviewWords,
+  getRecentMistakeWords,
+  getTodayWrongWords,
+  updateReviewState,
+} from '@/features/review/scheduling';
 
 describe('updateReviewState', () => {
   it('schedules correct answers farther out', () => {
@@ -72,5 +79,131 @@ describe('review selectors', () => {
 
     expect(getDueReviewWords(data, new Date('2026-03-22T10:00:00.000Z')).map((word) => word.id)).toEqual(['w1']);
     expect(getRecentMistakeWords(data).map((word) => word.id)).toEqual(['w2']);
+  });
+
+  it('returns today wrong words uniquely and skips deleted words', () => {
+    const data = createEmptyAppData();
+    data.words = [
+      {
+        id: 'w1',
+        bookId: 'b1',
+        word: 'alpha',
+        createdAt: '2026-03-24T12:00:00.000Z',
+        updatedAt: '2026-03-24T12:00:00.000Z',
+      },
+      {
+        id: 'w2',
+        bookId: 'b1',
+        word: 'beta',
+        createdAt: '2026-03-24T12:00:00.000Z',
+        updatedAt: '2026-03-24T12:00:00.000Z',
+      },
+    ];
+    data.attempts = [
+      {
+        id: 'a1',
+        wordId: 'w1',
+        typedAnswer: 'alpa',
+        isCorrect: false,
+        answeredAt: '2026-03-25T08:00:00',
+      },
+      {
+        id: 'a2',
+        wordId: 'w1',
+        typedAnswer: 'alpah',
+        isCorrect: false,
+        answeredAt: '2026-03-25T09:00:00',
+      },
+      {
+        id: 'a3',
+        wordId: 'w2',
+        typedAnswer: 'beta',
+        isCorrect: true,
+        answeredAt: '2026-03-25T09:30:00',
+      },
+      {
+        id: 'a4',
+        wordId: 'deleted-word',
+        typedAnswer: 'ghost',
+        isCorrect: false,
+        answeredAt: '2026-03-25T10:00:00',
+      },
+      {
+        id: 'a5',
+        wordId: 'w2',
+        typedAnswer: 'btea',
+        isCorrect: false,
+        answeredAt: '2026-03-24T12:00:00',
+      },
+    ];
+
+    expect(getTodayWrongWords(data, new Date('2026-03-25T12:00:00')).map((word) => word.id)).toEqual(['w1']);
+    expect(countTodayWrongWords(data, new Date('2026-03-25T12:00:00'))).toBe(1);
+  });
+
+  it('uses the latest incorrect attempt per source word when ordering wrong-words review groups', () => {
+    const data = createEmptyAppData();
+    data.books = [
+      {
+        id: 'wrong-book',
+        name: '错词本',
+        kind: 'wrong-words',
+        chapterSize: 10,
+        createdAt: '2026-03-20T12:00:00.000Z',
+        updatedAt: '2026-03-20T12:00:00.000Z',
+      },
+    ];
+    data.words = [
+      {
+        id: 'wrong-1',
+        bookId: 'wrong-book',
+        word: 'alpha',
+        sourceWordId: 'origin-1',
+        createdAt: '2026-03-20T12:00:00.000Z',
+        updatedAt: '2026-03-20T12:00:00.000Z',
+      },
+      {
+        id: 'wrong-2',
+        bookId: 'wrong-book',
+        word: 'beta',
+        sourceWordId: 'origin-2',
+        createdAt: '2026-03-20T12:00:00.000Z',
+        updatedAt: '2026-03-20T12:00:00.000Z',
+      },
+    ];
+    data.attempts = [
+      {
+        id: 'a1',
+        wordId: 'origin-1',
+        typedAnswer: 'alpa',
+        isCorrect: false,
+        answeredAt: '2026-03-25T08:00:00.000Z',
+      },
+      {
+        id: 'a2',
+        wordId: 'origin-2',
+        typedAnswer: 'btea',
+        isCorrect: false,
+        answeredAt: '2026-03-25T09:00:00.000Z',
+      },
+      {
+        id: 'a3',
+        wordId: 'origin-1',
+        typedAnswer: 'alpah',
+        isCorrect: false,
+        answeredAt: '2026-03-25T10:00:00.000Z',
+      },
+      {
+        id: 'a4',
+        wordId: 'origin-2',
+        typedAnswer: 'beta',
+        isCorrect: true,
+        answeredAt: '2026-03-25T11:00:00.000Z',
+      },
+    ];
+
+    const progress = getBookStudyProgress(data, 'wrong-book', 10);
+
+    expect(progress.chapters[0]?.words.map((word) => word.id)).toEqual(['wrong-1', 'wrong-2']);
   });
 });

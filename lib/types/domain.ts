@@ -1,8 +1,11 @@
 export type ReviewResult = 'correct' | 'incorrect';
+export type WordBookKind = 'normal' | 'wrong-words';
 
 export interface WordBook {
   id: string;
   name: string;
+  kind?: WordBookKind;
+  wrongWordsDate?: string;
   chapterSize?: number;
   createdAt: string;
   updatedAt: string;
@@ -18,6 +21,7 @@ export interface WordEntry {
   exampleTranslate?: string;
   chapter?: string;
   notes?: string;
+  sourceWordId?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -66,4 +70,5 @@ export interface WordInput {
   exampleTranslate?: string;
   chapter?: string;
   notes?: string;
+  sourceWordId?: string;
 }

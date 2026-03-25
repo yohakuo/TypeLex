@@ -1,4 +1,4 @@
-import type { AppData, ReviewResult, ReviewState, WordEntry } from '@/lib/types/domain';
+import type { AppData, ReviewResult, ReviewState, WordBook, WordEntry } from '@/lib/types/domain';
 
 const HOUR = 60 * 60 * 1000;
 const DAY = 24 * HOUR;
@@ -54,6 +54,23 @@ export function getDueReviewWords(data: AppData, now: Date): WordEntry[] {
 
     return new Date(state.nextReviewAt).getTime() <= now.getTime();
   });
+}
+
+export function getTodayWrongWords(data: AppData, now: Date): WordEntry[] {
+  const startOfToday = new Date(now);
+  startOfToday.setHours(0, 0, 0, 0);
+
+  const wrongWordIds = new Set(
+    data.attempts
+      .filter((attempt) => !attempt.isCorrect && new Date(attempt.answeredAt).getTime() >= startOfToday.getTime())
+      .map((attempt) => attempt.wordId),
+  );
+
+  return data.words.filter((word) => wrongWordIds.has(word.id));
+}
+
+export function countTodayWrongWords(data: AppData, now: Date): number {
+  return getTodayWrongWords(data, now).length;
 }
 
 export function getRecentMistakeWords(data: AppData): WordEntry[] {

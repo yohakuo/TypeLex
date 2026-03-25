@@ -22,7 +22,7 @@ export function useSoundEffects() {
     }
 
     if (!typeAudio.current) {
-      typeAudio.current = new Audio('/sounds/typing-sound.mp3');
+      typeAudio.current = new Audio('/sounds/mouse-click.mp3');
       typeAudio.current.preload = 'auto';
       typeAudio.current.volume = 0.16;
     }
@@ -30,13 +30,13 @@ export function useSoundEffects() {
     if (!correctAudio.current) {
       correctAudio.current = new Audio('/sounds/universfield-game-bonus.mp3');
       correctAudio.current.preload = 'auto';
-      correctAudio.current.volume = 0.24;
+      correctAudio.current.volume = 0.2;
     }
 
     if (!incorrectAudio.current) {
       incorrectAudio.current = new Audio('/sounds/universfield-error.mp3');
       incorrectAudio.current.preload = 'auto';
-      incorrectAudio.current.volume = 0.2;
+      incorrectAudio.current.volume = 0.25;
     }
   }, []);
 

@@ -4,7 +4,13 @@ import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { EmptyState } from '@/components/empty-state';
-import { getBookById, getBookStudyChapter, getStudyProgressKey, resolveStudyProgress } from '@/features/books/selectors';
+import {
+  getBookById,
+  getBookStudyChapter,
+  getBookStudyChapters,
+  getStudyProgressKey,
+  resolveStudyProgress,
+} from '@/features/books/selectors';
 import { isCorrectAnswer } from '@/features/study/answer';
 import { useSpeechSynthesis } from '@/lib/speech/use-speech-synthesis';
 import { useSoundEffects } from '@/lib/speech/use-sound-effects';
@@ -23,7 +29,10 @@ export default function StudyPage() {
     () => getBookStudyChapter(data, bookId, chapter, fallbackChapterSize),
     [bookId, chapter, data, fallbackChapterSize],
   );
-  const words = chapterData?.words ?? [];
+  const chapters = useMemo(() => getBookStudyChapters(data, bookId, fallbackChapterSize), [bookId, data, fallbackChapterSize]);
+  const currentChapterPosition = chapters.findIndex((entry) => entry.chapter === chapter);
+  const nextChapter = currentChapterPosition >= 0 ? chapters[currentChapterPosition + 1] : undefined;
+  const words = useMemo(() => chapterData?.words ?? [], [chapterData]);
   const chapterSize = chapterData?.size ?? fallbackChapterSize;
 
   const progressKey = useMemo(() => getStudyProgressKey(bookId, chapter, chapterSize), [bookId, chapter, chapterSize]);
@@ -35,20 +44,17 @@ export default function StudyPage() {
   const [currentIndex, setCurrentIndex] = useState(resolvedProgress.currentIndex);
   const [answer, setAnswer] = useState('');
   const [cursorIndex, setCursorIndex] = useState(0);
-  const [lastAttempt, setLastAttempt] = useState<{ word: string; typed: string; correct: boolean } | null>(null);
+  const [showCompletionPrompt, setShowCompletionPrompt] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    setCurrentIndex(resolvedProgress.currentIndex);
-    setAnswer('');
-    setCursorIndex(0);
-  }, [resolvedProgress.currentIndex, progressKey]);
 
   const currentWord = words[currentIndex] ?? null;
   const currentCompletedCount = resolvedProgress.isCompleted
     ? words.length
     : Math.min(Math.max(resolvedProgress.completedCount, currentIndex), words.length);
   const currentProgressPercent = words.length > 0 ? Math.round((currentCompletedCount / words.length) * 100) : 0;
+
+  const { speak, supported } = useSpeechSynthesis();
+  const { playTypeSound, playCorrectSound, playIncorrectSound } = useSoundEffects();
 
   const persistProgress = useCallback(
     (nextIndex: number, completedCount: number) => {
@@ -76,26 +82,112 @@ export default function StudyPage() {
     [bookId, chapter, chapterSize, progressKey, updateStudyProgress, words.length],
   );
 
+  const resetInputState = useCallback(() => {
+    setAnswer('');
+    setCursorIndex(0);
+  }, []);
+
   const moveToIndex = useCallback(
     (nextIndex: number) => {
       if (words.length === 0) {
         return;
       }
 
-      const normalizedIndex = ((nextIndex % words.length) + words.length) % words.length;
-      const wrapped = nextIndex >= words.length;
-      const completedCount = wrapped ? words.length : Math.max(currentCompletedCount, normalizedIndex);
+      const boundedIndex = Math.min(Math.max(nextIndex, 0), words.length - 1);
+      const completedCount = Math.max(currentCompletedCount, boundedIndex);
 
-      setAnswer('');
-      setCursorIndex(0);
-      setCurrentIndex(normalizedIndex);
-      persistProgress(normalizedIndex, completedCount);
+      resetInputState();
+      setShowCompletionPrompt(false);
+      setCurrentIndex(boundedIndex);
+      persistProgress(boundedIndex, completedCount);
     },
-    [currentCompletedCount, persistProgress, words.length],
+    [currentCompletedCount, persistProgress, resetInputState, words.length],
   );
 
-  const { speak, supported } = useSpeechSynthesis();
-  const { playTypeSound, playCorrectSound, playIncorrectSound } = useSoundEffects();
+  const moveToPreviousWord = useCallback(() => {
+    if (currentIndex <= 0) {
+      return;
+    }
+
+    moveToIndex(currentIndex - 1);
+  }, [currentIndex, moveToIndex]);
+
+  const moveToNextWord = useCallback(() => {
+    if (currentIndex >= words.length - 1) {
+      return;
+    }
+
+    moveToIndex(currentIndex + 1);
+  }, [currentIndex, moveToIndex, words.length]);
+
+  const completeChapter = useCallback(() => {
+    persistProgress(0, words.length);
+    resetInputState();
+    setShowCompletionPrompt(true);
+  }, [persistProgress, resetInputState, words.length]);
+
+  const submitCurrentAnswer = useCallback(() => {
+    if (!currentWord || answer.length === 0) {
+      return;
+    }
+
+    const isCorrect = isCorrectAnswer(answer, currentWord.word);
+    if (isCorrect) {
+      playCorrectSound();
+    } else {
+      playIncorrectSound();
+    }
+
+    recordAttempt({
+      wordId: currentWord.id,
+      typedAnswer: answer,
+      isCorrect,
+    });
+
+    const isLastWord = currentIndex >= words.length - 1;
+    if (isLastWord) {
+      completeChapter();
+      return;
+    }
+
+    moveToIndex(currentIndex + 1);
+  }, [
+    answer,
+    completeChapter,
+    currentIndex,
+    currentWord,
+    moveToIndex,
+    playCorrectSound,
+    playIncorrectSound,
+    recordAttempt,
+    words.length,
+  ]);
+
+  const previousWordAttempt = useMemo(() => {
+    if (currentIndex <= 0) {
+      return null;
+    }
+
+    const previousWord = words[currentIndex - 1];
+    if (!previousWord) {
+      return null;
+    }
+
+    const latestAttempt = [...data.attempts].reverse().find((attempt) => attempt.wordId === previousWord.id);
+    if (!latestAttempt) {
+      return null;
+    }
+
+    return {
+      word: previousWord.word,
+      meaningParts: (previousWord.meaning || '')
+        .split(/[；;]+/)
+        .map((part) => part.trim())
+        .filter(Boolean),
+      typed: latestAttempt.typedAnswer,
+      correct: latestAttempt.isCorrect,
+    };
+  }, [currentIndex, data.attempts, words]);
 
   const speakCurrent = useCallback(() => {
     if (currentWord) {
@@ -104,15 +196,28 @@ export default function StudyPage() {
   }, [currentWord, speak]);
 
   useEffect(() => {
+    if (showCompletionPrompt) {
+      return;
+    }
+
+    setCurrentIndex(resolvedProgress.currentIndex);
+    resetInputState();
+  }, [progressKey, resolvedProgress.currentIndex, resetInputState, showCompletionPrompt]);
+
+  useEffect(() => {
     speakCurrent();
   }, [speakCurrent]);
 
   useEffect(() => {
     containerRef.current?.focus();
-  }, [currentIndex]);
+  }, [currentIndex, showCompletionPrompt]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
+      if (showCompletionPrompt) {
+        return;
+      }
+
       if (event.key === 'Tab') {
         event.preventDefault();
         speakCurrent();
@@ -121,15 +226,13 @@ export default function StudyPage() {
 
       if (event.key === 'ArrowUp') {
         event.preventDefault();
-        if (currentIndex > 0) {
-          moveToIndex(currentIndex - 1);
-        }
+        moveToPreviousWord();
         return;
       }
 
       if (event.key === 'ArrowDown') {
         event.preventDefault();
-        moveToIndex(currentIndex + 1);
+        moveToNextWord();
         return;
       }
 
@@ -147,25 +250,7 @@ export default function StudyPage() {
 
       if (event.key === 'Enter') {
         event.preventDefault();
-        if (currentWord && answer.length > 0) {
-          const isCorrect = isCorrectAnswer(answer, currentWord.word);
-          if (isCorrect) {
-            playCorrectSound();
-          } else {
-            playIncorrectSound();
-          }
-          recordAttempt({
-            wordId: currentWord.id,
-            typedAnswer: answer,
-            isCorrect,
-          });
-          setLastAttempt({
-            word: currentWord.word,
-            typed: answer,
-            correct: isCorrect,
-          });
-          moveToIndex(currentIndex + 1);
-        }
+        submitCurrentAnswer();
         return;
       }
 
@@ -193,15 +278,12 @@ export default function StudyPage() {
   }, [
     answer.length,
     cursorIndex,
-    currentIndex,
-    currentWord,
-    moveToIndex,
-    playCorrectSound,
-    playIncorrectSound,
+    moveToNextWord,
+    moveToPreviousWord,
     playTypeSound,
-    recordAttempt,
+    showCompletionPrompt,
     speakCurrent,
-    answer,
+    submitCurrentAnswer,
   ]);
 
   if (!book) {
@@ -239,62 +321,73 @@ export default function StudyPage() {
   return (
     <HydrationGate>
       <div className="typing-page" ref={containerRef} tabIndex={0}>
-        <div className="typing-topbar" style={{ position: 'relative' }}>
-          <Link href={`/study/${book.id}`} className="typing-back-link">
-            ← 返回 {chapterBackLabel}
-          </Link>
+        <div className="typing-topbar">
+          <div style={{ display: 'grid', gap: '8px' }}>
+            <Link href={`/study/${book.id}`} className="typing-back-link">
+              ← 返回 {chapterBackLabel}
+            </Link>
 
-          <div style={{ position: 'absolute', right: '16px', top: '8px', fontSize: '0.9rem', color: '#6b7280' }}>
-            {chapterLabel}
+            {previousWordAttempt ? (
+              <div className="typing-previous-word">
+                <div className="typing-previous-word-label">上个词</div>
+                <div className="typing-previous-word-text">{previousWordAttempt.word}</div>
+                {previousWordAttempt.meaningParts.length > 0 ? (
+                  <div className="typing-previous-word-meanings">
+                    {previousWordAttempt.meaningParts.map((meaning) => (
+                      <span key={meaning} className="typing-previous-word-meaning">
+                        {meaning}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </div>
 
-          {lastAttempt && (
-            <div
-              style={{
-                position: 'absolute',
-                left: '16px',
-                top: '40px',
-                fontSize: '0.9rem',
-                color: lastAttempt.correct ? '#10b981' : '#ef4444',
-              }}
-            >
-              上个词: {lastAttempt.correct ? '✓ ' : '✗ '}
-              <strong style={{ marginLeft: '4px' }}>{lastAttempt.word}</strong>
-              {!lastAttempt.correct && (
-                <span style={{ textDecoration: 'line-through', color: '#6b7280', marginLeft: '8px' }}>
-                  {lastAttempt.typed}
-                </span>
-              )}
-            </div>
-          )}
-
-          <span className="typing-progress">
-            第 {currentIndex + 1} 题 / {words.length}
-            {' · '}
-            已完成 {currentCompletedCount} / {words.length}
-            {' · '}
-            {currentProgressPercent}%
-          </span>
+          <div style={{ display: 'grid', gap: '8px', justifyItems: 'end', textAlign: 'right' }}>
+            <span className="typing-progress">{currentIndex + 1}/{words.length},{currentProgressPercent}%</span>
+            <span style={{ fontSize: '0.9rem', color: '#6b7280' }}>{chapterLabel}</span>
+          </div>
         </div>
 
         <div className="typing-center">
-          {!supported && (
-            <p className="notice notice-error">
-              当前浏览器不支持语音合成，听写功能仍然可用，但无法播放发音。
-            </p>
+          {!supported ? (
+            <p className="notice notice-error">当前浏览器不支持语音合成，听写功能仍然可用，但无法播放发音。</p>
+          ) : null}
+
+          {showCompletionPrompt ? (
+            <div className="panel" style={{ width: 'min(520px, 100%)', textAlign: 'center' }}>
+              <p className="kicker">章节完成</p>
+              <h2 style={{ marginBottom: '12px' }}>{chapterLabel} 已完成</h2>
+              <p className="muted" style={{ marginBottom: '20px' }}>
+                本章单词已全部完成，可以继续下一章或返回首页。
+              </p>
+              <div className="button-row" style={{ justifyContent: 'center' }}>
+                {nextChapter ? (
+                  <Link href={`/study/${bookId}/run?chapter=${nextChapter.chapter}`} className="button">
+                    下一章
+                  </Link>
+                ) : null}
+                <Link href="/" className="button-secondary">
+                  返回首页
+                </Link>
+              </div>
+            </div>
+          ) : (
+            <>
+              <p className="typing-hint">听单词发音，拼写出来</p>
+
+              <div className="typing-display" aria-live="polite">
+                {answer.split('').map((char, i) => (
+                  <span key={i}>
+                    {cursorIndex === i ? <span className="typing-caret" /> : null}
+                    <span className="typing-char typing-char-entered">{char}</span>
+                  </span>
+                ))}
+                {cursorIndex === answer.length ? <span className="typing-caret" /> : null}
+              </div>
+            </>
           )}
-
-          <p className="typing-hint">听单词发音，拼写出来</p>
-
-          <div className="typing-display" aria-live="polite">
-            {answer.split('').map((char, i) => (
-              <span key={i}>
-                {cursorIndex === i ? <span className="typing-caret" /> : null}
-                <span className="typing-char typing-char-entered">{char}</span>
-              </span>
-            ))}
-            {cursorIndex === answer.length ? <span className="typing-caret" /> : null}
-          </div>
         </div>
 
         <div className="typing-shortcuts">

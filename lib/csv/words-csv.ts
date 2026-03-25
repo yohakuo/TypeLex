@@ -10,6 +10,7 @@ const CSV_HEADER_ALIASES: Record<keyof WordInput, string[]> = {
   exampleTranslate: ['exampletranslate'],
   chapter: ['chapter'],
   notes: ['notes'],
+  sourceWordId: ['sourcewordid'],
 };
 
 const WORD_INPUT_FIELDS = Object.keys(CSV_HEADER_ALIASES) as (keyof WordInput)[];
@@ -53,6 +54,7 @@ export function normalizeWordInput(input: WordInput): WordInput {
     exampleTranslate: normalizeOptionalText(input.exampleTranslate),
     chapter: normalizeOptionalText(input.chapter),
     notes: normalizeOptionalText(input.notes),
+    sourceWordId: normalizeOptionalText(input.sourceWordId),
   };
 }
 

@@ -1,4 +1,4 @@
-import type { AppData, StudyProgress, WordBook, WordEntry } from '@/lib/types/domain';
+import type { AppData, DictationAttempt, StudyProgress, WordBook, WordEntry } from '@/lib/types/domain';
 
 export interface ResolvedStudyProgress {
   currentIndex: number;
@@ -6,6 +6,8 @@ export interface ResolvedStudyProgress {
   totalWords: number;
   isCompleted: boolean;
 }
+
+export type ChapterStudyStatus = 'last-studied' | 'completed' | 'in-progress' | 'unstarted';
 
 export interface ChapterStudyProgress extends ResolvedStudyProgress {
   chapter: number;
@@ -15,6 +17,9 @@ export interface ChapterStudyProgress extends ResolvedStudyProgress {
   startWordNumber: number;
   endWordNumber: number;
   words: WordEntry[];
+  isLastStudied: boolean;
+  status: ChapterStudyStatus;
+  lastStudiedAt?: string;
 }
 
 export interface BookStudyProgressSummary {
@@ -32,6 +37,73 @@ interface ChapterWordGroup {
   startWordNumber: number;
   endWordNumber: number;
   words: WordEntry[];
+}
+
+function isWrongWordsBook(book: WordBook | undefined): boolean {
+  return book?.kind === 'wrong-words' || book?.name === '错词本';
+}
+
+function getTimestamp(value: string | undefined | null): number | null {
+  if (!value) {
+    return null;
+  }
+
+  const timestamp = new Date(value).getTime();
+  return Number.isNaN(timestamp) ? null : timestamp;
+}
+
+function getWordFallbackTimestamp(word: WordEntry): number {
+  return getTimestamp(word.updatedAt) ?? getTimestamp(word.createdAt) ?? 0;
+}
+
+function buildLatestIncorrectAttemptIndex(attempts: DictationAttempt[]): Map<string, number> {
+  const latestIncorrectAttemptByWordId = new Map<string, number>();
+
+  attempts.forEach((attempt) => {
+    if (attempt.isCorrect) {
+      return;
+    }
+
+    const timestamp = getTimestamp(attempt.answeredAt);
+    if (timestamp === null) {
+      return;
+    }
+
+    const current = latestIncorrectAttemptByWordId.get(attempt.wordId);
+    if (current === undefined || timestamp > current) {
+      latestIncorrectAttemptByWordId.set(attempt.wordId, timestamp);
+    }
+  });
+
+  return latestIncorrectAttemptByWordId;
+}
+
+function sortWrongWordsByRecentMistake(words: WordEntry[], attempts: DictationAttempt[]): WordEntry[] {
+  const latestIncorrectAttemptByWordId = buildLatestIncorrectAttemptIndex(attempts);
+
+  return words
+    .map((word, index) => ({
+      word,
+      index,
+      recentMistakeAt: word.sourceWordId
+        ? latestIncorrectAttemptByWordId.get(word.sourceWordId) ?? null
+        : null,
+      fallbackAt: getWordFallbackTimestamp(word),
+    }))
+    .sort((left, right) => {
+      const recentMistakeDiff = (right.recentMistakeAt ?? -1) - (left.recentMistakeAt ?? -1);
+      if (recentMistakeDiff !== 0) {
+        return recentMistakeDiff;
+      }
+
+      const fallbackDiff = right.fallbackAt - left.fallbackAt;
+      if (fallbackDiff !== 0) {
+        return fallbackDiff;
+      }
+
+      return left.index - right.index;
+    })
+    .map((entry) => entry.word);
 }
 
 export function getBookWords(data: AppData, bookId: string): WordEntry[] {
@@ -90,6 +162,10 @@ function normalizeChapterLabel(value: string | undefined): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
+function getProgressTimestamp(progress: StudyProgress | undefined): number | null {
+  return getTimestamp(progress?.updatedAt);
+}
+
 function buildExplicitChapterGroups(words: WordEntry[]): ChapterWordGroup[] {
   const chapterMap = new Map<string, ChapterWordGroup>();
 
@@ -117,7 +193,7 @@ function buildExplicitChapterGroups(words: WordEntry[]): ChapterWordGroup[] {
   return Array.from(chapterMap.values());
 }
 
-function buildFixedSizeChapterGroups(words: WordEntry[], chapterSize: number): ChapterWordGroup[] {
+function buildFixedSizeChapterGroups(words: WordEntry[], chapterSize: number, labelUnit: '章' | '组' = '章'): ChapterWordGroup[] {
   const safeChapterSize = chapterSize > 0 ? chapterSize : 20;
   const totalChapters = Math.ceil(words.length / safeChapterSize);
 
@@ -125,7 +201,7 @@ function buildFixedSizeChapterGroups(words: WordEntry[], chapterSize: number): C
     const chapterWords = words.slice(index * safeChapterSize, (index + 1) * safeChapterSize);
 
     return {
-      label: `第 ${index + 1} 章`,
+      label: `第 ${index + 1} ${labelUnit}`,
       hasExplicitLabel: false,
       size: safeChapterSize,
       startWordNumber: index * safeChapterSize + 1,
@@ -135,10 +211,22 @@ function buildFixedSizeChapterGroups(words: WordEntry[], chapterSize: number): C
   });
 }
 
-function buildChapterWordGroups(words: WordEntry[], chapterSize: number): {
+function buildChapterWordGroups(data: AppData, bookId: string, chapterSize: number): {
   usesExplicitChapters: boolean;
   groups: ChapterWordGroup[];
 } {
+  const book = getBookById(data, bookId);
+  const words = getBookWords(data, bookId);
+
+  if (isWrongWordsBook(book)) {
+    const sortedWords = sortWrongWordsByRecentMistake(words, data.attempts);
+
+    return {
+      usesExplicitChapters: false,
+      groups: buildFixedSizeChapterGroups(sortedWords, chapterSize, '组'),
+    };
+  }
+
   const usesExplicitChapters = words.some((word) => normalizeChapterLabel(word.chapter) !== undefined);
 
   return {
@@ -150,13 +238,13 @@ function buildChapterWordGroups(words: WordEntry[], chapterSize: number): {
 }
 
 export function getBookStudyChapters(data: AppData, bookId: string, chapterSize: number): ChapterStudyProgress[] {
-  const words = getBookWords(data, bookId);
-  const { groups } = buildChapterWordGroups(words, chapterSize);
+  const { groups } = buildChapterWordGroups(data, bookId, chapterSize);
 
-  return groups.map((group, index) => {
+  const chaptersWithProgress = groups.map((group, index) => {
     const chapter = index + 1;
     const size = group.size;
-    const resolved = resolveStudyProgress(data.studyProgress[getStudyProgressKey(bookId, chapter, size)], group.words.length);
+    const rawProgress = data.studyProgress[getStudyProgressKey(bookId, chapter, size)];
+    const resolved = resolveStudyProgress(rawProgress, group.words.length);
 
     return {
       chapter,
@@ -166,7 +254,41 @@ export function getBookStudyChapters(data: AppData, bookId: string, chapterSize:
       startWordNumber: group.startWordNumber,
       endWordNumber: group.endWordNumber,
       words: group.words,
+      lastStudiedAt: rawProgress?.updatedAt,
+      progressTimestamp: getProgressTimestamp(rawProgress),
       ...resolved,
+    };
+  });
+
+  const lastStudiedChapter = chaptersWithProgress.reduce<{ chapter: number; timestamp: number } | null>((latest, chapter) => {
+    if (chapter.progressTimestamp === null) {
+      return latest;
+    }
+
+    if (!latest || chapter.progressTimestamp > latest.timestamp) {
+      return {
+        chapter: chapter.chapter,
+        timestamp: chapter.progressTimestamp,
+      };
+    }
+
+    return latest;
+  }, null);
+
+  return chaptersWithProgress.map(({ progressTimestamp, ...chapter }) => {
+    const hasStarted = chapter.completedCount > 0 || chapter.currentIndex > 0 || progressTimestamp !== null;
+    const isLastStudied = lastStudiedChapter?.chapter === chapter.chapter;
+
+    return {
+      ...chapter,
+      isLastStudied,
+      status: isLastStudied
+        ? 'last-studied'
+        : chapter.isCompleted
+          ? 'completed'
+          : hasStarted
+            ? 'in-progress'
+            : 'unstarted',
     };
   });
 }
@@ -182,14 +304,13 @@ export function getBookStudyChapter(
 
 export function getBookStudyProgress(data: AppData, bookId: string, chapterSize: number): BookStudyProgressSummary {
   const words = getBookWords(data, bookId);
-  const { usesExplicitChapters } = buildChapterWordGroups(words, chapterSize);
   const chapters = getBookStudyChapters(data, bookId, chapterSize);
 
   return {
     totalWords: words.length,
     completedCount: chapters.reduce((sum, chapter) => sum + chapter.completedCount, 0),
     totalChapters: chapters.length,
-    usesExplicitChapters,
+    usesExplicitChapters: chapters.some((chapter) => chapter.hasExplicitLabel),
     chapters,
   };
 }

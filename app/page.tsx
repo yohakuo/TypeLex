@@ -1,98 +1,118 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { EmptyState } from '@/components/empty-state';
-import { countBookDueWords } from '@/features/review/scheduling';
+import { countBookDueWords, countTodayWrongWords, getTodayWrongWords } from '@/features/review/scheduling';
 import { useAppData, HydrationGate, PrimaryActionLink } from '@/providers/app-data-provider';
 
 export default function HomePage() {
-  const { data, createBook, importWords } = useAppData();
+  const router = useRouter();
+  const { data, createBook, importWords, sync } = useAppData();
   const [collectMessage, setCollectMessage] = useState<string | null>(null);
+  const now = new Date();
+  const wrongBook = data.books.find((book) => book.kind === 'wrong-words' || book.name === '错词本');
+  const todayWrongWords = getTodayWrongWords(data, now);
+  const todayWrongCount = countTodayWrongWords(data, now);
 
-  const handleCollectWrongWords = () => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+  const collectTodayWrongWords = () => {
+    if (todayWrongWords.length === 0) {
+      setCollectMessage('今日没有错题记录，太棒了！');
+      return null;
+    }
 
-    const wrongWordIds = new Set(
-      data.attempts
-        .filter(a => !a.isCorrect && new Date(a.answeredAt) >= today)
-        .map(a => a.wordId)
+    let targetBook = wrongBook;
+    if (!targetBook) {
+      const result = createBook('错词本', 20, { kind: 'wrong-words' });
+      if (!result.ok || !result.book) {
+        setCollectMessage('无法创建错题本。');
+        return null;
+      }
+
+      targetBook = result.book;
+    }
+
+    const imported = importWords(
+      targetBook.id,
+      todayWrongWords.map((word) => ({
+        word: word.word,
+        meaning: word.meaning,
+        phonetic: word.phonetic,
+        example: word.example,
+        exampleTranslate: word.exampleTranslate,
+        chapter: word.chapter,
+        notes: word.notes,
+        sourceWordId: word.sourceWordId ?? word.id,
+      })),
     );
 
-    if (wrongWordIds.size === 0) {
-      setCollectMessage('今日没有错题记录，太棒了！');
+    setCollectMessage(
+      imported > 0 ? `成功将 ${imported} 个新错词加入"错词本"！` : '"错词本"已包含今天的错词。',
+    );
+
+    return targetBook;
+  };
+
+  const handleCollectWrongWords = () => {
+    collectTodayWrongWords();
+  };
+
+  const handleStartReview = () => {
+    if (wrongBook) {
+      router.push(`/study/${wrongBook.id}`);
       return;
     }
 
-    const wrongWords = data.words.filter(w => wrongWordIds.has(w.id));
-
-    let wrongBook = data.books.find(b => b.name === '错词本');
-    if (!wrongBook) {
-      const result = createBook('错词本');
-      if (result.ok && result.book) {
-        wrongBook = result.book;
-      } else {
-        setCollectMessage('无法创建错题本。');
-        return;
-      }
+    const targetBook = collectTodayWrongWords();
+    if (targetBook) {
+      router.push(`/study/${targetBook.id}`);
     }
-
-    const inputs = wrongWords.map(w => ({
-      word: w.word,
-      meaning: w.meaning,
-      phonetic: w.phonetic,
-      example: w.example,
-      exampleTranslate: w.exampleTranslate,
-      chapter: w.chapter,
-      notes: w.notes,
-    }));
-
-    const imported = importWords(wrongBook.id, inputs);
-    setCollectMessage(`成功将 ${imported} 个新错词加入"错词本"！`);
   };
-  const now = new Date();
-  const totalDue = data.books.reduce((sum, book) => sum + countBookDueWords(data, book.id, now), 0);
-  const recentMistakes = data.attempts.filter((attempt) => !attempt.isCorrect).slice(-10).length;
 
   return (
     <HydrationGate>
       <div className="page-stack">
-        <section className="page-header">
-          <div>
-            <p className="kicker">数据安全存储在本地浏览器</p>
+        <section className="page-header home-hero">
+          <div className="home-hero-copy">
+            <p className="kicker">默认保存在本地浏览器，可选开启个人云同步</p>
             <h1>首页</h1>
             <p>
-              手动添加单词，或通过 CSV 批量导入。
+              手动添加单词，或通过 CSV 批量导入。离线时照常使用，登录后可把整份学习数据同步到个人云端。
             </p>
           </div>
           <div className="button-row">
             <PrimaryActionLink href="/books">管理单词本</PrimaryActionLink>
-            <Link href="/review" className="button-secondary">
+            <button type="button" onClick={handleStartReview} className="button-secondary">
               开始复习
+            </button>
+            <Link href="/settings" className="button-secondary">
+              {sync.session ? '查看同步设置' : '开启同步'}
             </Link>
           </div>
         </section>
 
         <section className="grid grid-3">
-          <article className="panel">
+          <article className="panel stat-panel">
             <div className="stat-value">{data.books.length}</div>
             <h2>单词本</h2>
             <p>为学校、考试或个人学习创建不同的拼写集。</p>
           </article>
-          <article className="panel">
+          <article className="panel stat-panel">
             <div className="stat-value">{data.words.length}</div>
             <h2>总单词数</h2>
-            <p>所有保存的单词都存储在浏览器中，直到您清除本地数据。</p>
+            <p>默认保存在浏览器本地；如需跨设备，可在同步设置里开启个人云同步。</p>
           </article>
-          <article className="panel">
-            <div className="stat-value">{totalDue}</div>
+          <article className="panel stat-panel stat-panel-accent">
+            <div className="stat-value">{todayWrongCount}</div>
             <h2>待复习</h2>
-            <p> {recentMistakes} 个单词等待复习。</p>
-            <button onClick={handleCollectWrongWords} className="button-secondary" style={{ marginTop: '12px' }}>
-              收集今日错题
-            </button>
-            {collectMessage && <p style={{ marginTop: '8px', fontSize: '0.85em', color: '#10b981' }}>{collectMessage}</p>}
+            <p>今日错词本候选共 {todayWrongCount} 个单词。</p>
+            <div className="home-collect-action">
+              <button type="button" onClick={handleCollectWrongWords} className="button-secondary">
+                收集今日错题
+              </button>
+            </div>
+            {collectMessage && <p className="inline-feedback inline-feedback-success">{collectMessage}</p>}
           </article>
         </section>
 
@@ -104,7 +124,12 @@ export default function HomePage() {
           />
         ) : (
           <section className="panel">
-            <h2>选择词书</h2>
+            <div className="section-heading">
+              <div>
+                <h2>选择词书</h2>
+                <p className="section-subtitle">保持轻量整理，直接进入练习或管理词条。</p>
+              </div>
+            </div>
             <div className="list">
               {data.books.map((book) => {
                 const bookDueCount = countBookDueWords(data, book.id, now);
