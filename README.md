@@ -1,6 +1,6 @@
 # TypeLex
 
-TypeLex 面向听写、章节化练习和错题复习场景，所有数据默认保存在浏览器本地，无需后端服务或账号系统。
+TypeLex 面向听写、章节化练习和错题复习场景，所有数据默认保存在浏览器本地，也可以自行配置同步方案。
 
 ## 功能概览
 
@@ -38,38 +38,6 @@ npm install
 ```bash
 npm run dev
 ```
-
-### 构建生产版本
-
-```bash
-npm run build
-```
-
-### 启动生产服务
-
-```bash
-npm run start
-```
-
-### 运行测试
-
-```bash
-npm run test
-```
-
-### 监听模式运行测试
-
-```bash
-npm run test:watch
-```
-
-### 运行 lint
-
-```bash
-npm run lint
-```
-
-
 
 ## 同步方案
 使用轻量数据库 [Supabase](https://supabase.com/dashboard/project/xkfmrnoixutdzjhjsqvy/branches)。

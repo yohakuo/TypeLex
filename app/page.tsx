@@ -127,7 +127,7 @@ export default function HomePage() {
             <div className="section-heading">
               <div>
                 <h2>选择词书</h2>
-                <p className="section-subtitle">保持轻量整理，直接进入练习或管理词条。</p>
+                <p className="section-subtitle">直接进入练习或管理词书。</p>
               </div>
             </div>
             <div className="list">

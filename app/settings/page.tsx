@@ -28,7 +28,7 @@ export default function SettingsPage() {
           <div>
             <p className="kicker">本地优先 + 可选云同步</p>
             <h1>同步设置</h1>
-            <p>默认仍保存在当前浏览器。登录后可把整份学习数据同步到你自己的 Supabase 账号。</p>
+            <p>默认保存在当前浏览器。登录后可将学习数据同步到自己的 Supabase 账号。</p>
           </div>
         </section>
 
@@ -85,7 +85,7 @@ export default function SettingsPage() {
               <div className="section-heading">
                 <div>
                   <h2>同步控制</h2>
-                  <p className="section-subtitle">本地仍然先可用；只有点击按钮时才会与云端拉取、上传或提示冲突。</p>
+                  <p className="section-subtitle">只有点击按钮时才会开始同步。</p>
                 </div>
               </div>
               <div className="list">

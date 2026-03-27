@@ -391,46 +391,61 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
     seedAttemptedRef.current = true;
 
     try {
-      const res = await fetch('/王陆807.csv');
-      if (!res.ok) {
-        throw new Error('Failed to fetch default dict');
-      }
-
-      const text = await res.text();
-      const parsed = parseWordsCsv(text);
-      if (parsed.rows.length === 0) {
-        return;
-      }
-
       const now = new Date().toISOString();
-      const bookId = createId();
-      const book: WordBook = {
-        id: bookId,
-        name: '王陆807',
-        chapterSize: 20,
-        kind: 'normal',
-        createdAt: now,
-        updatedAt: now,
-      };
+      const seedConfigs = [
+        { filePath: '/ielts-listening-s4.csv', name: 'ielts-listening-s4' },
+        { filePath: '/wl807.csv', name: 'wl807.csv' },
+      ] as const;
+      const books: WordBook[] = [];
+      const entries: WordEntry[] = [];
 
-      const entries: WordEntry[] = parsed.rows.map((row) => {
-        const normalized = normalizeWordInput(row);
+      for (const config of seedConfigs) {
+        const res = await fetch(config.filePath);
+        if (!res.ok) {
+          throw new Error(`Failed to fetch default dict: ${config.filePath}`);
+        }
 
-        return {
-          id: createId(),
-          bookId,
-          word: normalized.word.toLowerCase(),
-          meaning: normalized.meaning,
-          phonetic: normalized.phonetic,
-          example: normalized.example,
-          exampleTranslate: normalized.exampleTranslate,
-          chapter: normalized.chapter,
-          notes: normalized.notes,
-          sourceWordId: normalized.sourceWordId,
+        const text = await res.text();
+        const parsed = parseWordsCsv(text);
+        if (parsed.rows.length === 0) {
+          continue;
+        }
+
+        const bookId = createId();
+        books.push({
+          id: bookId,
+          name: config.name,
+          chapterSize: 20,
+          kind: 'normal',
           createdAt: now,
           updatedAt: now,
-        };
-      });
+        });
+
+        entries.push(
+          ...parsed.rows.map((row) => {
+            const normalized = normalizeWordInput(row);
+
+            return {
+              id: createId(),
+              bookId,
+              word: normalized.word.toLowerCase(),
+              meaning: normalized.meaning,
+              phonetic: normalized.phonetic,
+              example: normalized.example,
+              exampleTranslate: normalized.exampleTranslate,
+              chapter: normalized.chapter,
+              notes: normalized.notes,
+              sourceWordId: normalized.sourceWordId,
+              createdAt: now,
+              updatedAt: now,
+            };
+          }),
+        );
+      }
+
+      if (books.length === 0 || entries.length === 0) {
+        return;
+      }
 
       const nextReviewStates = Object.fromEntries(
         entries.map((word) => [word.id, createDefaultReviewState(word.id)]),
@@ -438,7 +453,7 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
 
       applyLocalChange(() => ({
         ...createEmptyAppData(),
-        books: [book],
+        books,
         words: entries,
         reviewStates: nextReviewStates,
       }));
