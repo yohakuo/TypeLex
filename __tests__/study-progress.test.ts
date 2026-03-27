@@ -1,6 +1,32 @@
 import { describe, expect, it } from 'vitest';
-import { getBookStudyProgress, getStudyProgressKey, resolveStudyProgress } from '@/features/books/selectors';
+import {
+  getBookStudyProgress,
+  getNextStudyNavigationTarget,
+  getStudyProgressKey,
+  resolveStudyProgress,
+} from '@/features/books/selectors';
 import { createEmptyAppData } from '@/lib/storage/app-data';
+
+function createBookWord(id: string, bookId: string, word: string, updatedAt: string, sourceWordId?: string) {
+  return {
+    id,
+    bookId,
+    word,
+    sourceWordId,
+    createdAt: '2026-03-20T12:00:00.000Z',
+    updatedAt,
+  };
+}
+
+function createAttempt(id: string, wordId: string, answeredAt: string) {
+  return {
+    id,
+    wordId,
+    typedAnswer: id,
+    isCorrect: false,
+    answeredAt,
+  };
+}
 
 describe('resolveStudyProgress', () => {
   it('returns defaults when no progress exists', () => {
@@ -475,5 +501,95 @@ describe('getBookStudyProgress', () => {
     const progress = getBookStudyProgress(data, 'wrong-book', 10);
 
     expect(progress.chapters[0]?.words.map((word) => word.id)).toEqual(['wrong-a', 'wrong-c', 'wrong-b']);
+  });
+});
+
+describe('getNextStudyNavigationTarget', () => {
+  it('returns the first unfinished word after regrouping for wrong-words books', () => {
+    const data = createEmptyAppData();
+    data.books = [
+      {
+        id: 'wrong-book',
+        name: '错词本',
+        kind: 'wrong-words',
+        chapterSize: 2,
+        createdAt: '2026-03-20T12:00:00.000Z',
+        updatedAt: '2026-03-20T12:00:00.000Z',
+      },
+    ];
+    data.words = [
+      createBookWord('w1', 'wrong-book', 'alpha', '2026-03-20T12:00:00.000Z', 'o1'),
+      createBookWord('w2', 'wrong-book', 'beta', '2026-03-20T12:00:00.000Z', 'o2'),
+      createBookWord('w3', 'wrong-book', 'gamma', '2026-03-20T12:00:00.000Z', 'o3'),
+      createBookWord('w4', 'wrong-book', 'delta', '2026-03-20T12:00:00.000Z', 'o4'),
+    ];
+    data.attempts = [
+      createAttempt('a1', 'o1', '2026-03-25T04:00:00.000Z'),
+      createAttempt('a2', 'o2', '2026-03-25T03:00:00.000Z'),
+      createAttempt('a3', 'o3', '2026-03-25T02:00:00.000Z'),
+      createAttempt('a4', 'o4', '2026-03-25T01:00:00.000Z'),
+      createAttempt('a5', 'o1', '2026-03-25T08:00:00.000Z'),
+      createAttempt('a6', 'o2', '2026-03-25T07:00:00.000Z'),
+    ];
+
+    expect(getNextStudyNavigationTarget(data, 'wrong-book', 1, 2, ['w1', 'w2'])).toEqual({
+      chapter: 2,
+      wordId: 'w3',
+    });
+  });
+
+  it('returns a wordId anchor when the next unfinished word stays in the same numeric group', () => {
+    const data = createEmptyAppData();
+    data.books = [
+      {
+        id: 'wrong-book',
+        name: '错词本',
+        kind: 'wrong-words',
+        chapterSize: 2,
+        createdAt: '2026-03-20T12:00:00.000Z',
+        updatedAt: '2026-03-20T12:00:00.000Z',
+      },
+    ];
+    data.words = [
+      createBookWord('w1', 'wrong-book', 'alpha', '2026-03-20T12:00:00.000Z', 'o1'),
+      createBookWord('w2', 'wrong-book', 'beta', '2026-03-20T12:00:00.000Z', 'o2'),
+      createBookWord('w3', 'wrong-book', 'gamma', '2026-03-20T12:00:00.000Z', 'o3'),
+      createBookWord('w4', 'wrong-book', 'delta', '2026-03-20T12:00:00.000Z', 'o4'),
+    ];
+    data.attempts = [
+      createAttempt('a1', 'o1', '2026-03-25T04:00:00.000Z'),
+      createAttempt('a2', 'o2', '2026-03-25T03:00:00.000Z'),
+      createAttempt('a3', 'o3', '2026-03-25T02:00:00.000Z'),
+      createAttempt('a4', 'o4', '2026-03-25T01:00:00.000Z'),
+      createAttempt('a5', 'o3', '2026-03-25T09:00:00.000Z'),
+      createAttempt('a6', 'o2', '2026-03-25T08:00:00.000Z'),
+    ];
+
+    expect(getNextStudyNavigationTarget(data, 'wrong-book', 1, 2, ['w1', 'w2'])).toEqual({
+      chapter: 1,
+      wordId: 'w3',
+    });
+  });
+
+  it('keeps ordinary books on simple next-chapter navigation', () => {
+    const data = createEmptyAppData();
+    data.books = [
+      {
+        id: 'book-1',
+        name: 'Wordspell',
+        kind: 'normal',
+        chapterSize: 2,
+        createdAt: '2026-03-20T12:00:00.000Z',
+        updatedAt: '2026-03-20T12:00:00.000Z',
+      },
+    ];
+    data.words = [
+      createBookWord('w1', 'book-1', 'alpha', '2026-03-20T12:00:00.000Z'),
+      createBookWord('w2', 'book-1', 'beta', '2026-03-20T12:00:00.000Z'),
+      createBookWord('w3', 'book-1', 'gamma', '2026-03-20T12:00:00.000Z'),
+      createBookWord('w4', 'book-1', 'delta', '2026-03-20T12:00:00.000Z'),
+    ];
+
+    expect(getNextStudyNavigationTarget(data, 'book-1', 1, 2, ['w1', 'w2'])).toEqual({ chapter: 2 });
   });
 });

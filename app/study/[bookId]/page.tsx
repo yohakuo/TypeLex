@@ -215,7 +215,7 @@ export default function ChapterSelectionPage() {
               return (
                 <Link
                   key={chapter.chapter}
-                  href={`/study/${book.id}/run?chapter=${chapter.chapter}`}
+                  href={`/study/${book.id}/run?chapter=${chapter.chapter}${wrongWordsBook && chapter.words[0] ? `&wordId=${chapter.words[0].id}` : ''}`}
                   className={cardClassName}
                 >
                   <div className="chapter-card-title-row">

@@ -7,7 +7,7 @@ import { EmptyState } from '@/components/empty-state';
 import {
   getBookById,
   getBookStudyChapter,
-  getBookStudyChapters,
+  getNextStudyNavigationTarget,
   getStudyProgressKey,
   resolveStudyProgress,
 } from '@/features/books/selectors';
@@ -24,45 +24,106 @@ export default function StudyPage() {
   const book = getBookById(data, bookId);
 
   const chapter = Math.max(parseInt(searchParams.get('chapter') || '1', 10), 1);
+  const wordId = searchParams.get('wordId');
   const fallbackChapterSize = book?.chapterSize || 20;
   const chapterData = useMemo(
     () => getBookStudyChapter(data, bookId, chapter, fallbackChapterSize),
     [bookId, chapter, data, fallbackChapterSize],
   );
-  const chapters = useMemo(() => getBookStudyChapters(data, bookId, fallbackChapterSize), [bookId, data, fallbackChapterSize]);
-  const currentChapterPosition = chapters.findIndex((entry) => entry.chapter === chapter);
-  const nextChapter = currentChapterPosition >= 0 ? chapters[currentChapterPosition + 1] : undefined;
-  const words = useMemo(() => chapterData?.words ?? [], [chapterData]);
+  const liveWords = useMemo(() => chapterData?.words ?? [], [chapterData]);
   const chapterSize = chapterData?.size ?? fallbackChapterSize;
-
-  const progressKey = useMemo(() => getStudyProgressKey(bookId, chapter, chapterSize), [bookId, chapter, chapterSize]);
-  const savedProgress = data.studyProgress[progressKey];
-  const resolvedProgress = useMemo(() => resolveStudyProgress(savedProgress, words.length), [savedProgress, words.length]);
   const chapterLabel = chapterData?.label ?? `第 ${chapter} 章`;
   const chapterBackLabel = chapterData?.hasExplicitLabel ? chapterLabel : `${book?.name ?? ''} 章节列表`;
 
-  const [currentIndex, setCurrentIndex] = useState(resolvedProgress.currentIndex);
+  const progressKey = useMemo(() => getStudyProgressKey(bookId, chapter, chapterSize), [bookId, chapter, chapterSize]);
+  const savedProgress = data.studyProgress[progressKey];
+  const resolvedProgress = useMemo(() => resolveStudyProgress(savedProgress, liveWords.length), [savedProgress, liveWords.length]);
+  const anchoredIndex = useMemo(() => {
+    if (!wordId) {
+      return -1;
+    }
+
+    return liveWords.findIndex((word) => word.id === wordId);
+  }, [liveWords, wordId]);
+  const initialCurrentIndex = anchoredIndex >= 0 ? anchoredIndex : resolvedProgress.currentIndex;
+  const initialCompletedCount = anchoredIndex >= 0
+    ? Math.max(resolvedProgress.completedCount, anchoredIndex)
+    : resolvedProgress.completedCount;
+  const routeEntryKey = `${progressKey}:${wordId ?? ''}`;
+
+  const [currentChapterWordIdsSnapshot, setCurrentChapterWordIdsSnapshot] = useState<string[]>([]);
+  const [currentIndex, setCurrentIndex] = useState(initialCurrentIndex);
+  const [completedCount, setCompletedCount] = useState(initialCompletedCount);
   const [answer, setAnswer] = useState('');
   const [cursorIndex, setCursorIndex] = useState(0);
   const [showCompletionPrompt, setShowCompletionPrompt] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const initializedRouteKeyRef = useRef<string | null>(null);
+
+  const resetInputState = useCallback(() => {
+    setAnswer('');
+    setCursorIndex(0);
+  }, []);
+
+  useEffect(() => {
+    const shouldInitialize = initializedRouteKeyRef.current !== routeEntryKey || (currentChapterWordIdsSnapshot.length === 0 && liveWords.length > 0);
+    if (!shouldInitialize) {
+      return;
+    }
+
+    initializedRouteKeyRef.current = routeEntryKey;
+    setCurrentChapterWordIdsSnapshot(liveWords.map((word) => word.id));
+    setCurrentIndex(initialCurrentIndex);
+    setCompletedCount(initialCompletedCount);
+    setShowCompletionPrompt(false);
+    resetInputState();
+  }, [currentChapterWordIdsSnapshot.length, initialCompletedCount, initialCurrentIndex, liveWords, resetInputState, routeEntryKey]);
+
+  const words = useMemo(() => {
+    if (currentChapterWordIdsSnapshot.length === 0) {
+      return liveWords;
+    }
+
+    const wordById = new Map(data.words.map((word) => [word.id, word]));
+    const snapshotWords = currentChapterWordIdsSnapshot
+      .map((id) => wordById.get(id))
+      .filter((word): word is NonNullable<typeof word> => word !== undefined);
+
+    return snapshotWords.length > 0 ? snapshotWords : liveWords;
+  }, [currentChapterWordIdsSnapshot, data.words, liveWords]);
+
+  const nextTarget = useMemo(
+    () => getNextStudyNavigationTarget(data, bookId, chapter, chapterSize, currentChapterWordIdsSnapshot),
+    [bookId, chapter, chapterSize, currentChapterWordIdsSnapshot, data],
+  );
+  const nextChapterHref = nextTarget
+    ? `/study/${bookId}/run?chapter=${nextTarget.chapter}${nextTarget.wordId ? `&wordId=${nextTarget.wordId}` : ''}`
+    : null;
+
+  useEffect(() => {
+    if (words.length === 0 || currentIndex <= words.length - 1) {
+      return;
+    }
+
+    setCurrentIndex(words.length - 1);
+  }, [currentIndex, words.length]);
 
   const currentWord = words[currentIndex] ?? null;
-  const currentCompletedCount = resolvedProgress.isCompleted
+  const currentCompletedCount = showCompletionPrompt
     ? words.length
-    : Math.min(Math.max(resolvedProgress.completedCount, currentIndex), words.length);
+    : Math.min(Math.max(completedCount, currentIndex), words.length);
   const currentProgressPercent = words.length > 0 ? Math.round((currentCompletedCount / words.length) * 100) : 0;
 
   const { speak, supported } = useSpeechSynthesis();
   const { playTypeSound, playCorrectSound, playIncorrectSound } = useSoundEffects();
 
   const persistProgress = useCallback(
-    (nextIndex: number, completedCount: number) => {
+    (nextIndex: number, nextCompletedCount: number) => {
       if (words.length === 0) {
         return;
       }
 
-      const boundedCompletedCount = Math.min(Math.max(completedCount, 0), words.length);
+      const boundedCompletedCount = Math.min(Math.max(nextCompletedCount, 0), words.length);
       const isCompleted = boundedCompletedCount >= words.length;
       const safeIndex = isCompleted ? 0 : Math.min(Math.max(nextIndex, 0), words.length - 1);
 
@@ -82,11 +143,6 @@ export default function StudyPage() {
     [bookId, chapter, chapterSize, progressKey, updateStudyProgress, words.length],
   );
 
-  const resetInputState = useCallback(() => {
-    setAnswer('');
-    setCursorIndex(0);
-  }, []);
-
   const moveToIndex = useCallback(
     (nextIndex: number) => {
       if (words.length === 0) {
@@ -94,12 +150,13 @@ export default function StudyPage() {
       }
 
       const boundedIndex = Math.min(Math.max(nextIndex, 0), words.length - 1);
-      const completedCount = Math.max(currentCompletedCount, boundedIndex);
+      const nextCompletedCount = Math.max(currentCompletedCount, boundedIndex);
 
       resetInputState();
       setShowCompletionPrompt(false);
       setCurrentIndex(boundedIndex);
-      persistProgress(boundedIndex, completedCount);
+      setCompletedCount(nextCompletedCount);
+      persistProgress(boundedIndex, nextCompletedCount);
     },
     [currentCompletedCount, persistProgress, resetInputState, words.length],
   );
@@ -121,6 +178,7 @@ export default function StudyPage() {
   }, [currentIndex, moveToIndex, words.length]);
 
   const completeChapter = useCallback(() => {
+    setCompletedCount(words.length);
     persistProgress(0, words.length);
     resetInputState();
     setShowCompletionPrompt(true);
@@ -194,15 +252,6 @@ export default function StudyPage() {
       speak(currentWord.word);
     }
   }, [currentWord, speak]);
-
-  useEffect(() => {
-    if (showCompletionPrompt) {
-      return;
-    }
-
-    setCurrentIndex(resolvedProgress.currentIndex);
-    resetInputState();
-  }, [progressKey, resolvedProgress.currentIndex, resetInputState, showCompletionPrompt]);
 
   useEffect(() => {
     speakCurrent();
@@ -363,8 +412,8 @@ export default function StudyPage() {
                 本章单词已全部完成！
               </p>
               <div className="button-row" style={{ justifyContent: 'center' }}>
-                {nextChapter ? (
-                  <Link href={`/study/${bookId}/run?chapter=${nextChapter.chapter}`} className="button">
+                {nextChapterHref ? (
+                  <Link href={nextChapterHref} className="button">
                     下一章
                   </Link>
                 ) : null}

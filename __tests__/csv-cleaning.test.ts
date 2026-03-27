@@ -5,7 +5,7 @@ import { parseWordsCsv } from '@/lib/csv/words-csv';
 
 describe('parseWordsCsv with public fixtures', () => {
   it('parses the default public word book', () => {
-    const csvPath = path.join(process.cwd(), 'public', '王陆807.csv');
+    const csvPath = path.join(process.cwd(), 'public', 'wl807.csv');
     const input = readFileSync(csvPath, 'utf8');
 
     const result = parseWordsCsv(input);

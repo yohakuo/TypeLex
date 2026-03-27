@@ -30,6 +30,11 @@ export interface BookStudyProgressSummary {
   chapters: ChapterStudyProgress[];
 }
 
+export interface StudyNavigationTarget {
+  chapter: number;
+  wordId?: string;
+}
+
 interface ChapterWordGroup {
   label: string;
   hasExplicitLabel: boolean;
@@ -300,6 +305,40 @@ export function getBookStudyChapter(
   chapterSize: number,
 ): ChapterStudyProgress | undefined {
   return getBookStudyChapters(data, bookId, chapterSize).find((entry) => entry.chapter === chapter);
+}
+
+export function getNextStudyNavigationTarget(
+  data: AppData,
+  bookId: string,
+  chapter: number,
+  chapterSize: number,
+  completedWordIdsSnapshot: string[] = [],
+): StudyNavigationTarget | undefined {
+  const book = getBookById(data, bookId);
+  const chapters = getBookStudyChapters(data, bookId, chapterSize);
+  const currentChapterPosition = chapters.findIndex((entry) => entry.chapter === chapter);
+
+  if (currentChapterPosition < 0) {
+    return undefined;
+  }
+
+  if (!isWrongWordsBook(book)) {
+    const nextChapter = chapters[currentChapterPosition + 1];
+    return nextChapter ? { chapter: nextChapter.chapter } : undefined;
+  }
+
+  const completedWordIds = new Set(completedWordIdsSnapshot);
+  const laterWords = chapters
+    .slice(currentChapterPosition)
+    .flatMap((entry) => entry.words.map((word) => ({ chapter: entry.chapter, wordId: word.id })));
+  const nextWord = laterWords.find((entry) => !completedWordIds.has(entry.wordId));
+
+  return nextWord
+    ? {
+        chapter: nextWord.chapter,
+        wordId: nextWord.wordId,
+      }
+    : undefined;
 }
 
 export function getBookStudyProgress(data: AppData, bookId: string, chapterSize: number): BookStudyProgressSummary {
