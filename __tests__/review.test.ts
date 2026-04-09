@@ -4,6 +4,7 @@ import { createEmptyAppData } from '@/lib/storage/app-data';
 import {
   countTodayWrongWords,
   getDueReviewWords,
+  getDueWrongWords,
   getRecentMistakeWords,
   getTodayWrongWords,
   updateReviewState,
@@ -81,6 +82,69 @@ describe('review selectors', () => {
     expect(getRecentMistakeWords(data).map((word) => word.id)).toEqual(['w2']);
   });
 
+
+  it('filters due wrong words by due time and last incorrect result', () => {
+    const data = createEmptyAppData();
+    data.words = [
+      { id: 'w1', bookId: 'b1', word: 'alpha', createdAt: '2026-03-20T12:00:00.000Z', updatedAt: '2026-03-20T12:00:00.000Z' },
+      { id: 'w2', bookId: 'b1', word: 'beta', createdAt: '2026-03-20T12:00:00.000Z', updatedAt: '2026-03-20T12:00:00.000Z' },
+      { id: 'w3', bookId: 'b1', word: 'gamma', createdAt: '2026-03-20T12:00:00.000Z', updatedAt: '2026-03-20T12:00:00.000Z' },
+      { id: 'w4', bookId: 'b1', word: 'delta', createdAt: '2026-03-20T12:00:00.000Z', updatedAt: '2026-03-20T12:00:00.000Z' },
+    ];
+
+    data.reviewStates = {
+      w1: {
+        wordId: 'w1',
+        lastResult: 'incorrect',
+        correctCount: 0,
+        wrongCount: 1,
+        lastReviewedAt: '2026-03-21T09:00:00.000Z',
+        nextReviewAt: '2026-03-22T09:00:00.000Z',
+      },
+      w2: {
+        wordId: 'w2',
+        lastResult: 'correct',
+        correctCount: 1,
+        wrongCount: 0,
+        lastReviewedAt: '2026-03-21T09:00:00.000Z',
+        nextReviewAt: '2026-03-22T09:00:00.000Z',
+      },
+      w3: {
+        wordId: 'w3',
+        lastResult: 'incorrect',
+        correctCount: 0,
+        wrongCount: 2,
+        lastReviewedAt: '2026-03-22T08:00:00.000Z',
+        nextReviewAt: '2026-03-22T13:00:00.000Z',
+      },
+      w4: {
+        wordId: 'w4',
+        lastResult: null,
+        correctCount: 0,
+        wrongCount: 0,
+        lastReviewedAt: null,
+        nextReviewAt: null,
+      },
+    };
+
+    expect(getDueWrongWords(data, new Date('2026-03-22T10:00:00.000Z')).map((word) => word.id)).toEqual(['w1']);
+  });
+
+  it('reflects state transitions after answers for due wrong queue', () => {
+    const data = createEmptyAppData();
+    data.words = [
+      { id: 'w1', bookId: 'b1', word: 'alpha', createdAt: '2026-03-20T12:00:00.000Z', updatedAt: '2026-03-20T12:00:00.000Z' },
+    ];
+
+    const incorrectState = updateReviewState(undefined, 'w1', 'incorrect', '2026-03-22T08:00:00.000Z');
+    data.reviewStates = { w1: incorrectState };
+
+    expect(getDueWrongWords(data, new Date('2026-03-22T12:01:00.000Z')).map((word) => word.id)).toEqual(['w1']);
+
+    data.reviewStates.w1 = updateReviewState(data.reviewStates.w1, 'w1', 'correct', '2026-03-22T12:05:00.000Z');
+
+    expect(getDueWrongWords(data, new Date('2026-03-22T12:06:00.000Z'))).toEqual([]);
+  });
   it('returns today wrong words uniquely and skips deleted words', () => {
     const data = createEmptyAppData();
     data.words = [

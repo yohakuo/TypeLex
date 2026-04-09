@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { EmptyState } from '@/components/empty-state';
-import { countBookDueWords, countTodayWrongWords, getTodayWrongWords } from '@/features/review/scheduling';
+import { countBookDueWords, getDueWrongWords, getTodayWrongWords } from '@/features/review/scheduling';
 import { useAppData, HydrationGate, PrimaryActionLink } from '@/providers/app-data-provider';
 
 export default function HomePage() {
@@ -14,7 +14,7 @@ export default function HomePage() {
   const now = new Date();
   const wrongBook = data.books.find((book) => book.kind === 'wrong-words' || book.name === '错词本');
   const todayWrongWords = getTodayWrongWords(data, now);
-  const todayWrongCount = countTodayWrongWords(data, now);
+  const todayWrongCount = getDueWrongWords(data, now).length;
 
   const collectTodayWrongWords = () => {
     if (todayWrongWords.length === 0) {
@@ -59,15 +59,7 @@ export default function HomePage() {
   };
 
   const handleStartReview = () => {
-    if (wrongBook) {
-      router.push(`/study/${wrongBook.id}`);
-      return;
-    }
-
-    const targetBook = collectTodayWrongWords();
-    if (targetBook) {
-      router.push(`/study/${targetBook.id}`);
-    }
+    router.push('/study/review/run');
   };
 
   return (

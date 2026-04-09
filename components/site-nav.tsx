@@ -7,6 +7,7 @@ import { useAppData } from '@/providers/app-data-provider';
 const links = [
   { href: '/', label: '首页' },
   { href: '/books', label: '单词本' },
+  { href: '/review', label: '复习' },
 ];
 
 export function SiteNav() {
