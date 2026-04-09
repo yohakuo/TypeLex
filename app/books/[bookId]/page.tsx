@@ -4,8 +4,8 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { ChangeEvent, FormEvent, useEffect, useState } from 'react';
 import { EmptyState } from '@/components/empty-state';
+import { parseImportedWordFile, type ImportedWordRows } from '@/features/books/import-file';
 import { getBookById } from '@/features/books/selectors';
-import { parseWordsCsv, parseWordsTxt } from '@/lib/csv/words-csv';
 import { HydrationGate, useAppData } from '@/providers/app-data-provider';
 
 const CHAPTER_SIZES = [20, 50, 100, 200];
@@ -72,19 +72,16 @@ export default function BookDetailPage() {
       return;
     }
 
-    let wordsToImport: any[] = [];
+    let wordsToImport: ImportedWordRows = [];
     if (file) {
       try {
-        const text = await file.text();
-        const isTxt = file.name.endsWith('.txt');
-        const parsed = isTxt ? parseWordsTxt(text) : parseWordsCsv(text);
-        if (parsed.rows.length === 0) {
+        wordsToImport = await parseImportedWordFile(file);
+        if (wordsToImport.length === 0) {
           setError('文件中没有解析到有效单词。');
           setMessage(null);
           return;
         }
-        wordsToImport = parsed.rows;
-      } catch (e) {
+      } catch {
         setError('读取文件时出错。');
         setMessage(null);
         return;

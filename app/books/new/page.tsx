@@ -3,8 +3,8 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ChangeEvent, FormEvent, useState } from 'react';
+import { parseImportedWordFile, type ImportedWordRows } from '@/features/books/import-file';
 import { HydrationGate, useAppData } from '@/providers/app-data-provider';
-import { parseWordsCsv, parseWordsTxt } from '@/lib/csv/words-csv';
 
 export default function NewBookPage() {
   const { createBook, importWords } = useAppData();
@@ -33,22 +33,22 @@ export default function NewBookPage() {
     event.preventDefault();
     if (!name.trim()) {
       setError('请输入单词书名字。');
+      setMessage(null);
       return;
     }
-    
-    let wordsToImport: any[] = [];
+
+    let wordsToImport: ImportedWordRows = [];
     if (file) {
       try {
-        const text = await file.text();
-        const isTxt = file.name.endsWith('.txt');
-        const parsed = isTxt ? parseWordsTxt(text) : parseWordsCsv(text);
-        if (parsed.rows.length === 0) {
+        wordsToImport = await parseImportedWordFile(file);
+        if (wordsToImport.length === 0) {
           setError('文件中没有解析到有效单词。');
+          setMessage(null);
           return;
         }
-        wordsToImport = parsed.rows;
-      } catch (e) {
+      } catch {
         setError('读取文件时出错。');
+        setMessage(null);
         return;
       }
     }
@@ -56,6 +56,7 @@ export default function NewBookPage() {
     const finalChapterSize = chapterSize === 'custom' ? customChapterSize : chapterSize;
     if (finalChapterSize <= 0) {
       setError('每章单词数必须大于 0。');
+      setMessage(null);
       return;
     }
 
@@ -63,6 +64,7 @@ export default function NewBookPage() {
 
     if (!result.ok || !result.book) {
       setError(result.error ?? '无法创建单词本。');
+      setMessage(null);
       return;
     }
 

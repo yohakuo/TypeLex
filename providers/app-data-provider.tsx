@@ -11,8 +11,21 @@ import {
   useRef,
   useState,
 } from 'react';
-import { createDefaultReviewState, updateReviewState } from '@/features/review/scheduling';
-import { normalizeWordInput, normalizeWordKey, parseWordsCsv } from '@/lib/csv/words-csv';
+import {
+  clearStudyProgressMutation,
+  createBookMutation,
+  createWordMutation,
+  deleteBookMutation,
+  deleteWordMutation,
+  importWordsMutation,
+  recordAttemptMutation,
+  resetAllDataMutation,
+  updateBookMutation,
+  updateStudyProgressMutation,
+  updateWordMutation,
+} from '@/features/app-data/mutations';
+import { createDefaultReviewState } from '@/features/review/scheduling';
+import { normalizeWordInput, parseWordsCsv } from '@/lib/csv/words-csv';
 import {
   createEmptyAppData,
   createId,
@@ -30,8 +43,6 @@ import { getSupabaseBrowserClient, hasSupabaseEnv } from '@/lib/sync/supabase-cl
 import { reconcileSnapshot } from '@/lib/sync/reconcile';
 import type {
   AppData,
-  DictationAttempt,
-  ReviewResult,
   StudyProgress,
   WordBook,
   WordEntry,
@@ -89,44 +100,6 @@ interface AppDataContextValue {
 }
 
 const AppDataContext = createContext<AppDataContextValue | null>(null);
-
-function hasDuplicateWord(words: WordEntry[], bookId: string, value: string, excludeWordId?: string): boolean {
-  const normalized = normalizeWordKey(value);
-
-  return words.some(
-    (word) => word.bookId === bookId && word.id !== excludeWordId && normalizeWordKey(word.word) === normalized,
-  );
-}
-
-function buildWordEntry(bookId: string, input: WordInput): WordEntry {
-  const now = new Date().toISOString();
-  const normalized = normalizeWordInput(input);
-
-  return {
-    id: createId(),
-    bookId,
-    word: normalized.word,
-    meaning: normalized.meaning,
-    phonetic: normalized.phonetic,
-    example: normalized.example,
-    exampleTranslate: normalized.exampleTranslate,
-    chapter: normalized.chapter,
-    notes: normalized.notes,
-    sourceWordId: normalized.sourceWordId,
-    createdAt: now,
-    updatedAt: now,
-  };
-}
-
-function buildAttempt(params: Required<RecordAttemptParams>): DictationAttempt {
-  return {
-    id: createId(),
-    wordId: params.wordId,
-    typedAnswer: params.typedAnswer,
-    isCorrect: params.isCorrect,
-    answeredAt: params.answeredAt,
-  };
-}
 
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message) {
@@ -598,274 +571,87 @@ export function AppDataProvider({ children }: { children: React.ReactNode }) {
   }, [hydrated]);
 
   const createBook = useCallback((name: string, chapterSize: number = 20, options?: CreateBookOptions) => {
-    const trimmed = name.trim();
+    const result = createBookMutation(dataRef.current, name, chapterSize, options);
 
-    if (!trimmed) {
-      return { ok: false, error: 'Book name is required.' };
+    if (!result.ok || !result.book) {
+      return { ok: false, error: result.error };
     }
 
-    const now = new Date().toISOString();
-    const book: WordBook = {
-      id: createId(),
-      name: trimmed,
-      kind: options?.kind ?? 'normal',
-      chapterSize,
-      createdAt: now,
-      updatedAt: now,
-    };
+    applyLocalChange(() => result.data);
 
-    applyLocalChange((current) => ({
-      ...current,
-      books: [...current.books, book],
-    }));
-
-    return { ok: true, book };
+    return { ok: true, book: result.book };
   }, [applyLocalChange]);
 
   const updateBook = useCallback((bookId: string, name: string, chapterSize: number) => {
-    const trimmed = name.trim();
+    const result = updateBookMutation(dataRef.current, bookId, name, chapterSize);
 
-    if (!trimmed) {
-      return { ok: false, error: 'Book name is required.' };
+    if (!result.ok) {
+      return { ok: false, error: result.error };
     }
 
-    const currentData = dataRef.current;
-    const bookExists = currentData.books.some((book) => book.id === bookId);
-
-    if (!bookExists) {
-      return { ok: false, error: 'Book not found.' };
-    }
-
-    applyLocalChange((current) => ({
-      ...current,
-      books: current.books.map((book) =>
-        book.id === bookId
-          ? { ...book, name: trimmed, chapterSize, updatedAt: new Date().toISOString() }
-          : book,
-      ),
-    }));
+    applyLocalChange(() => result.data);
 
     return { ok: true };
   }, [applyLocalChange]);
 
   const deleteBook = useCallback((bookId: string) => {
-    applyLocalChange((current) => {
-      const wordIds = new Set(current.words.filter((word) => word.bookId === bookId).map((word) => word.id));
-      const nextReviewStates = Object.fromEntries(
-        Object.entries(current.reviewStates).filter(([wordId]) => !wordIds.has(wordId)),
-      );
-
-      return {
-        ...current,
-        books: current.books.filter((book) => book.id !== bookId),
-        words: current.words.filter((word) => word.bookId !== bookId),
-        reviewStates: nextReviewStates,
-        attempts: current.attempts.filter((attempt) => !wordIds.has(attempt.wordId)),
-        studyProgress: Object.fromEntries(
-          Object.entries(current.studyProgress).filter(([, progress]) => progress.bookId !== bookId),
-        ),
-      };
-    });
+    applyLocalChange((current) => deleteBookMutation(current, bookId));
   }, [applyLocalChange]);
 
   const createWord = useCallback((bookId: string, input: WordInput) => {
-    const normalized = normalizeWordInput(input);
-    const currentData = dataRef.current;
+    const result = createWordMutation(dataRef.current, bookId, input);
 
-    if (!normalized.word) {
-      return { ok: false, error: 'Word is required.' };
+    if (!result.ok || !result.word) {
+      return { ok: false, error: result.error };
     }
 
-    if (hasDuplicateWord(currentData.words, bookId, normalized.word)) {
-      return { ok: false, error: 'This word already exists in the selected book.' };
-    }
+    applyLocalChange(() => result.data);
 
-    const word = buildWordEntry(bookId, normalized);
-
-    applyLocalChange((current) => ({
-      ...current,
-      words: [...current.words, word],
-      books: current.books.map((entry) =>
-        entry.id === bookId
-          ? {
-              ...entry,
-              updatedAt: word.updatedAt,
-            }
-          : entry,
-      ),
-      reviewStates: {
-        ...current.reviewStates,
-        [word.id]: createDefaultReviewState(word.id),
-      },
-    }));
-
-    return { ok: true, word };
+    return { ok: true, word: result.word };
   }, [applyLocalChange]);
 
   const updateWord = useCallback((wordId: string, input: WordInput) => {
-    const normalized = normalizeWordInput(input);
-    const currentData = dataRef.current;
+    const result = updateWordMutation(dataRef.current, wordId, input);
 
-    if (!normalized.word) {
-      return { ok: false, error: 'Word is required.' };
+    if (!result.ok) {
+      return { ok: false, error: result.error };
     }
 
-    const currentWord = currentData.words.find((word) => word.id === wordId);
-
-    if (!currentWord) {
-      return { ok: false, error: 'Word not found.' };
-    }
-
-    if (hasDuplicateWord(currentData.words, currentWord.bookId, normalized.word, wordId)) {
-      return { ok: false, error: 'This word already exists in the selected book.' };
-    }
-
-    applyLocalChange((current) => {
-      const updatedAt = new Date().toISOString();
-
-      return {
-        ...current,
-        words: current.words.map((word) =>
-          word.id === wordId
-            ? {
-                ...word,
-                word: normalized.word,
-                meaning: normalized.meaning,
-                phonetic: normalized.phonetic,
-                example: normalized.example,
-                exampleTranslate: normalized.exampleTranslate,
-                chapter: normalized.chapter,
-                notes: normalized.notes,
-                sourceWordId: normalized.sourceWordId ?? word.sourceWordId,
-                updatedAt,
-              }
-            : word,
-        ),
-        books: current.books.map((book) =>
-          book.id === currentWord.bookId
-            ? {
-                ...book,
-                updatedAt,
-              }
-            : book,
-        ),
-      };
-    });
+    applyLocalChange(() => result.data);
 
     return { ok: true };
   }, [applyLocalChange]);
 
   const deleteWord = useCallback((wordId: string) => {
-    applyLocalChange((current) => {
-      const nextReviewStates = { ...current.reviewStates };
-      delete nextReviewStates[wordId];
-
-      return {
-        ...current,
-        words: current.words.filter((word) => word.id !== wordId),
-        reviewStates: nextReviewStates,
-        attempts: current.attempts.filter((attempt) => attempt.wordId !== wordId),
-      };
-    });
+    applyLocalChange((current) => deleteWordMutation(current, wordId));
   }, [applyLocalChange]);
 
   const importWords = useCallback((bookId: string, words: WordInput[]) => {
-    const currentData = dataRef.current;
-    const seen = new Set(
-      currentData.words
-        .filter((word) => word.bookId === bookId)
-        .map((word) => normalizeWordKey(word.word)),
-    );
+    const result = importWordsMutation(dataRef.current, bookId, words);
 
-    const entries = words
-      .map((word) => normalizeWordInput(word))
-      .filter((word) => {
-        if (!word.word) {
-          return false;
-        }
-
-        const normalized = normalizeWordKey(word.word);
-
-        if (seen.has(normalized)) {
-          return false;
-        }
-
-        seen.add(normalized);
-        return true;
-      })
-      .map((word) => buildWordEntry(bookId, word));
-
-    if (entries.length === 0) {
+    if (result.importedCount === 0) {
       return 0;
     }
 
-    applyLocalChange((current) => {
-      const nextReviewStates = { ...current.reviewStates };
+    applyLocalChange(() => result.data);
 
-      entries.forEach((word) => {
-        nextReviewStates[word.id] = createDefaultReviewState(word.id);
-      });
-
-      return {
-        ...current,
-        words: [...current.words, ...entries],
-        reviewStates: nextReviewStates,
-        books: current.books.map((book) =>
-          book.id === bookId
-            ? {
-                ...book,
-                updatedAt: new Date().toISOString(),
-              }
-            : book,
-        ),
-      };
-    });
-
-    return entries.length;
+    return result.importedCount;
   }, [applyLocalChange]);
 
   const recordAttempt = useCallback((params: RecordAttemptParams) => {
-    const answeredAt = params.answeredAt ?? new Date().toISOString();
-    const result: ReviewResult = params.isCorrect ? 'correct' : 'incorrect';
-
-    applyLocalChange((current) => ({
-      ...current,
-      attempts: [...current.attempts, buildAttempt({ ...params, answeredAt })],
-      reviewStates: {
-        ...current.reviewStates,
-        [params.wordId]: updateReviewState(current.reviewStates[params.wordId], params.wordId, result, answeredAt),
-      },
-    }));
+    applyLocalChange((current) => recordAttemptMutation(current, params));
   }, [applyLocalChange]);
 
   const updateStudyProgress = useCallback(({ key, progress }: UpdateStudyProgressInput) => {
-    applyLocalChange((current) => ({
-      ...current,
-      studyProgress: {
-        ...current.studyProgress,
-        [key]: progress,
-      },
-    }));
+    applyLocalChange((current) => updateStudyProgressMutation(current, { key, progress }));
   }, [applyLocalChange]);
 
   const clearStudyProgress = useCallback((key: string) => {
-    applyLocalChange((current) => {
-      if (!(key in current.studyProgress)) {
-        return current;
-      }
-
-      const nextStudyProgress = { ...current.studyProgress };
-      delete nextStudyProgress[key];
-
-      return {
-        ...current,
-        studyProgress: nextStudyProgress,
-      };
-    });
+    applyLocalChange((current) => clearStudyProgressMutation(current, key));
   }, [applyLocalChange]);
 
   const resetAllData = useCallback(() => {
-    applyLocalChange(() => createEmptyAppData());
+    applyLocalChange(() => resetAllDataMutation());
   }, [applyLocalChange]);
 
   const sendMagicLink = useCallback(async (email: string) => {
