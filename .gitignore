@@ -20,4 +20,6 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-__tests__/
+__tests__/*
+!__tests__/ui/
+!__tests__/ui/**
